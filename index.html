@@ -1,390 +1,329 @@
-import React, { useState, useEffect } from 'react';
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>6학년 갓생 플래너</title>
+    <!-- Tailwind CSS (스타일링) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React 및 Babel (브라우저에서 리액트 즉시 실행) -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased font-sans">
 
-// 초기 더미 데이터 설정
-const INITIAL_SCHEDULE = [
-  { id: 1, time: '08:00 - 08:40', title: '☀️ 기상 및 등교 준비', desc: '아침 먹고 가방 챙기기' },
-  { id: 2, time: '08:40 - 15:00', title: '🏫 학교 수업', desc: '초등학교 6학년의 본업 충실히!' },
-  { id: 3, time: '15:30 - 16:30', title: '⚽ 방과후 운동 (축구/태권도)', desc: '체력은 국력! 열심히 뛰기' },
-  { id: 4, time: '17:00 - 19:00', title: '✍️ 학원 및 자기주도 학습', desc: '수학/영어 숙제 및 오늘 배운 내용 복습' },
-  { id: 5, time: '19:00 - 20:00', title: '🍽️ 저녁 식사 & 자유 시간', desc: '가족들과 맛있는 저녁 먹기' },
-  { id: 6, time: '20:00 - 21:30', title: '📚 독서 및 취미 생활', desc: '하루 30분 책 읽기 습관' },
-  { id: 7, time: '22:00 ~', title: '😴 꿈나라 여행 (취침)', desc: '내일을 위해 푹 자기' },
-];
+    <div id="root"></div>
 
-const INITIAL_TASKS = [
-  { id: 1, text: '수학 학원 숙제 끝내기', points: 20, completed: false, category: 'study' },
-  { id: 2, text: '영어 단어 20개 외우기', points: 15, completed: false, category: 'study' },
-  { id: 3, text: '스트레칭 또는 운동 30분', points: 15, completed: false, category: 'health' },
-  { id: 4, text: '내 방 책상 정리하기', points: 10, completed: false, category: 'chore' },
-  { id: 5, text: '일기 또는 독서록 작성', points: 20, completed: false, category: 'habit' },
-];
+    <script type="text/babel">
+        const { useState, useEffect } = React;
 
-const INITIAL_REWARDS = [
-  { id: 1, text: '주말 컴퓨터/게임 시간 1시간 추가', cost: 50, requested: false, approved: false },
-  { id: 2, text: '금요일 밤 원하는 야식 메뉴 선택권', cost: 100, requested: false, approved: false },
-  { id: 3, text: '가지고 싶었던 학용품/굿즈 선물', cost: 300, requested: false, approved: false },
-];
+        const INITIAL_SCHEDULE = [
+            { id: 1, time: '08:00 - 08:40', title: '☀️ 기상 및 등교 준비', desc: '아침 먹고 가방 챙기기' },
+            { id: 2, time: '08:40 - 15:00', title: '🏫 학교 수업', desc: '초등학교 6학년의 본업 충실히!' },
+            { id: 3, time: '15:30 - 16:30', title: '⚽ 방과후 운동 (축구/태권도)', desc: '체력은 국력! 열심히 뛰기' },
+            { id: 4, time: '17:00 - 19:00', title: '✍️ 학원 및 자기주도 학습', desc: '수학/영어 숙제 및 오늘 복습' },
+            { id: 5, time: '19:00 - 20:00', title: '🍽️ 저녁 식사 & 자유 시간', desc: '가족들과 맛있는 저녁 먹기' },
+            { id: 6, time: '20:00 - 21:30', title: '📚 독서 및 취미 생활', desc: '하루 30분 책 읽기 습관' },
+            { id: 7, time: '22:00 ~', title: '夢 꿈나라 여행 (취침)', desc: '내일을 위해 푹 자기' },
+        ];
 
-export default function App() {
-  // 상태 관리 (가족 코드 세션 시뮬레이션 포함)
-  const [familyCode, setFamilyCode] = useState('FAM-6012');
-  const [inputCode, setInputCode] = useState('');
-  const [role, setRole] = useState('student'); // student, mom, dad
-  const [activeTab, setActiveTab] = useState('schedule'); // schedule, quest, reward, board
-  
-  const [points, setPoints] = useState(0);
-  const [tasks, setTasks] = useState(INITIAL_TASKS);
-  const [rewards, setRewards] = useState(INITIAL_REWARDS);
-  const [praises, setPraises] = useState([
-    { id: 1, from: '엄마', text: '오늘 숙제 일찍 끝내서 너무 기특해! 👍', time: '오후 6:10' }
-  ]);
-  const [newMessage, setNewMessage] = useState('');
+        const INITIAL_TASKS = [
+            { id: 1, text: '수학 학원 숙제 끝내기', points: 20, completed: false, category: 'study' },
+            { id: 2, text: '영어 단어 20개 외우기', points: 15, completed: false, category: 'study' },
+            { id: 3, text: '스트레칭 또는 운동 30분', points: 15, completed: false, category: 'health' },
+            { id: 4, text: '내 방 책상 정리하기', points: 10, completed: false, category: 'chore' },
+            { id: 5, text: '일기 또는 독서록 작성', points: 20, completed: false, category: 'habit' },
+        ];
 
-  // LocalStorage 연동 (실시간 DB 연동 전 로컬 저장 기능)
-  useEffect(() => {
-    const savedPoints = localStorage.getItem(`${familyCode}_points`);
-    const savedTasks = localStorage.getItem(`${familyCode}_tasks`);
-    const savedRewards = localStorage.getItem(`${familyCode}_rewards`);
-    const savedPraises = localStorage.getItem(`${familyCode}_praises`);
+        const INITIAL_REWARDS = [
+            { id: 1, text: '주말 컴퓨터/게임 시간 1시간 추가', cost: 50, requested: false, approved: false },
+            { id: 2, text: '금요일 밤 원하는 야식 메뉴 선택권', cost: 100, requested: false, approved: false },
+            { id: 3, text: '가지고 싶었던 학용품/굿즈 선물', cost: 300, requested: false, approved: false },
+        ];
 
-    if (savedPoints) setPoints(Number(savedPoints));
-    if (savedTasks) setTasks(JSON.parse(savedTasks));
-    if (savedRewards) setRewards(JSON.parse(savedRewards));
-    if (savedPraises) setPraises(JSON.parse(savedPraises));
-  }, [familyCode]);
+        function App() {
+            const [familyCode, setFamilyCode] = useState('FAM-6012');
+            const [inputCode, setInputCode] = useState('');
+            const [role, setRole] = useState('student'); 
+            const [activeTab, setActiveTab] = useState('schedule'); 
+            
+            const [points, setPoints] = useState(0);
+            const [tasks, setTasks] = useState(INITIAL_TASKS);
+            const [rewards, setRewards] = useState(INITIAL_REWARDS);
+            const [praises, setPraises] = useState([
+                { id: 1, from: '엄마', text: '오늘 숙제 일찍 끝내서 너무 기특해! 👍', time: '오후 6:10' }
+            ]);
+            const [newMessage, setNewMessage] = useState('');
 
-  const saveData = (key, data) => {
-    localStorage.setItem(`${familyCode}_${key}`, typeof data === 'string' ? data : JSON.stringify(data));
-  };
+            useEffect(() => {
+                const savedPoints = localStorage.getItem(`${familyCode}_points`);
+                const savedTasks = localStorage.getItem(`${familyCode}_tasks`);
+                const savedRewards = localStorage.getItem(`${familyCode}_rewards`);
+                const savedPraises = localStorage.getItem(`${familyCode}_praises`);
 
-  // 퀘스트 완료 처리
-  const toggleTask = (id) => {
-    const updated = tasks.map(task => {
-      if (task.id === id) {
-        const nextStatus = !task.completed;
-        // 포인트 계산 (학생이 완료하면 추가, 취소하면 차감)
-        setPoints(prev => {
-          const nextPoints = nextStatus ? prev + task.points : prev - task.points;
-          saveData('points', nextPoints);
-          return nextPoints;
-        });
-        return { ...task, completed: nextStatus };
-      }
-      return task;
-    });
-    setTasks(updated);
-    saveData('tasks', updated);
-  };
+                if (savedPoints) setPoints(Number(savedPoints));
+                if (savedTasks) setTasks(JSON.parse(savedTasks));
+                if (savedRewards) setRewards(JSON.parse(savedRewards));
+                if (savedPraises) setPraises(JSON.parse(savedPraises));
+            }, [familyCode]);
 
-  // 보상 신청하기 (학생)
-  const requestReward = (id) => {
-    const target = rewards.find(r => r.id === id);
-    if (points < target.cost) {
-      alert('포인트가 부족해요! 퀘스트를 더 완료해 주세요.');
-      return;
-    }
-    const updated = rewards.map(r => r.id === id ? { ...r, requested: true } : r);
-    setRewards(updated);
-    saveData('rewards', updated);
-  };
+            const saveData = (key, data) => {
+                localStorage.setItem(`${familyCode}_${key}`, typeof data === 'string' ? data : JSON.stringify(data));
+            };
 
-  // 보상 승인하기 (부모님)
-  const approveReward = (id, cost) => {
-    setPoints(prev => {
-      const nextPoints = prev - cost;
-      saveData('points', nextPoints);
-      return nextPoints;
-    });
-    const updated = rewards.map(r => r.id === id ? { ...r, requested: false, approved: true } : r);
-    setRewards(updated);
-    saveData('rewards', updated);
-  };
+            const toggleTask = (id) => {
+                const updated = tasks.map(task => {
+                    if (task.id === id) {
+                        const nextStatus = !task.completed;
+                        setPoints(prev => {
+                            const nextPoints = nextStatus ? prev + task.points : prev - task.points;
+                            saveData('points', nextPoints);
+                            return nextPoints;
+                        });
+                        return { ...task, completed: nextStatus };
+                    }
+                    return task;
+                });
+                setTasks(updated);
+                saveData('tasks', updated);
+            };
 
-  // 칭찬 한마디 남기기
-  const addPraise = (e) => {
-    e.preventDefault();
-    if (!newMessage.trim()) return;
-    
-    const roleName = role === 'mom' ? '엄마' : role === 'dad' ? '아빠' : '나';
-    const newPraise = {
-      id: Date.now(),
-      from: roleName,
-      text: newMessage,
-      time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
-    };
-    
-    const updated = [newPraise, ...praises];
-    setPraises(updated);
-    setNewMessage('');
-    saveData('praises', updated);
-  };
+            const requestReward = (id) => {
+                const target = rewards.find(r => r.id === id);
+                if (points < target.cost) {
+                    alert('포인트가 부족해요! 퀘스트를 더 완료해 주세요.');
+                    return;
+                }
+                const updated = rewards.map(r => r.id === id ? { ...r, requested: true } : r);
+                setRewards(updated);
+                saveData('rewards', updated);
+            };
 
-  // 가족 코드 변경 (방 입장)
-  const handleConnectFamily = (e) => {
-    e.preventDefault();
-    if (inputCode.trim()) {
-      setFamilyCode(inputCode.trim().toUpperCase());
-      alert(`${inputCode.toUpperCase()} 가족 공간으로 이동했습니다!`);
-    }
-  };
+            const approveReward = (id, cost) => {
+                setPoints(prev => {
+                    const nextPoints = prev - cost;
+                    saveData('points', nextPoints);
+                    return nextPoints;
+                });
+                const updated = rewards.map(r => r.id === id ? { ...r, requested: false, approved: true } : r);
+                setRewards(updated);
+                saveData('rewards', updated);
+            };
 
-  // 레벨 계산기
-  const getLevel = () => {
-    if (points >= 500) return { name: '🪐 우주 마스터', next: '최고 등급 달성!' };
-    if (points >= 200) return { name: '🏆 열정 탐험가', next: '500p까지 파이팅!' };
-    return { name: '🌱 새싹 꿈나무', next: '200p 달성 시 레벨업!' };
-  };
+            const addPraise = (e) => {
+                e.preventDefault();
+                if (!newMessage.trim()) return;
+                
+                const roleName = role === 'mom' ? '엄마' : role === 'dad' ? '아빠' : '나';
+                const newPraise = {
+                    id: Date.now(),
+                    from: roleName,
+                    text: newMessage,
+                    time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+                };
+                
+                const updated = [newPraise, ...praises];
+                setPraises(updated);
+                setNewMessage('');
+                saveData('praises', updated);
+            };
 
-  return (
-    <div className="min-h-screen bg-slate-50 font-sans antialiased text-slate-800">
-      {/* 상단 네비게이션 헤더 */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
-        <div className="max-w-5xl mx-auto px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <span className="text-2xl">🚀</span>
-            <h1 className="text-xl font-bold tracking-tight text-indigo-600">6학년 갓생 플래너</h1>
-            <span className="bg-indigo-50 text-indigo-700 text-xs px-2.5 py-1 rounded-full font-semibold border border-indigo-100">
-              {familyCode}
-            </span>
-          </div>
-          
-          {/* 가족 공유 및 역할 컨트롤 */}
-          <div className="flex flex-wrap items-center gap-3">
-            <form onSubmit={handleConnectFamily} className="flex items-center bg-slate-100 rounded-lg p-1 border border-slate-200">
-              <input 
-                type="text" 
-                placeholder="가족코드 입력" 
-                value={inputCode}
-                onChange={(e) => setInputCode(e.target.value)}
-                className="bg-transparent text-xs px-2 py-1 outline-none w-24 focus:w-32 transition-all"
-              />
-              <button type="submit" className="bg-slate-700 text-white text-xs px-2.5 py-1 rounded-md hover:bg-slate-800">
-                연결
-              </button>
-            </form>
+            const handleConnectFamily = (e) => {
+                e.preventDefault();
+                if (inputCode.trim()) {
+                    setFamilyCode(inputCode.trim().toUpperCase());
+                    alert(`${inputCode.toUpperCase()} 가족 공간으로 이동했습니다!`);
+                }
+            };
 
-            <div className="flex bg-slate-100 rounded-lg p-1 border border-slate-200 text-xs font-medium">
-              <button 
-                onClick={() => setRole('student')} 
-                className={`px-3 py-1.5 rounded-md transition-all ${role === 'student' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600 hover:text-slate-900'}`}
-              >
-                👦 아들
-              </button>
-              <button 
-                onClick={() => setRole('mom')} 
-                className={`px-3 py-1.5 rounded-md transition-all ${role === 'mom' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600 hover:text-slate-900'}`}
-              >
-                👩 엄마
-              </button>
-              <button 
-                onClick={() => setRole('dad')} 
-                className={`px-3 py-1.5 rounded-md transition-all ${role === 'dad' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600 hover:text-slate-900'}`}
-              >
-                👨 아빠
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
+            const getLevel = () => {
+                if (points >= 500) return { name: '🪐 우주 마스터', next: '최고 등급 달성!' };
+                if (points >= 200) return { name: '🏆 열정 탐험가', next: '500p까지 파이팅!' };
+                return { name: '🌱 새싹 꿈나무', next: '200p 달성 시 레벨업!' };
+            };
 
-      <main className="max-w-5xl mx-auto px-4 py-6">
-        {/* 상단 요약 대시보드 */}
-        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl p-6 text-white shadow-md mb-6 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-6">
-          <div>
-            <p className="text-indigo-100 text-sm font-medium">현재 보유 포인트</p>
-            <h2 className="text-4xl font-extrabold mt-1">{points} <span className="text-xl font-normal">💎</span></h2>
-          </div>
-          <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 flex-1 max-w-md border border-white/10">
-            <div className="flex justify-between items-center mb-1 text-sm font-bold">
-              <span>현재 등급: {getLevel().name}</span>
-            </div>
-            <p className="text-xs text-indigo-200">{getLevel().next}</p>
-            <div className="w-full bg-white/20 h-2 rounded-full mt-3 overflow-hidden">
-              <div className="bg-amber-400 h-full transition-all duration-500" style={{ width: `${Math.min((points / 500) * 100, 100)}%` }}></div>
-            </div>
-          </div>
-        </div>
+            return (
+                <div className="min-h-screen bg-slate-50">
+                    <header className="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
+                        <div className="max-w-5xl mx-auto px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-4">
+                            <div className="flex items-center gap-3">
+                                <span className="text-2xl">🚀</span>
+                                <h1 className="text-xl font-bold text-indigo-600">6학년 갓생 플래너</h1>
+                                <span className="bg-indigo-50 text-indigo-700 text-xs px-2.5 py-1 rounded-full font-semibold border border-indigo-100">
+                                    {familyCode}
+                                </span>
+                            </div>
+                            
+                            <div className="flex flex-wrap items-center gap-3">
+                                <form onSubmit={handleConnectFamily} className="flex items-center bg-slate-100 rounded-lg p-1 border border-slate-200">
+                                    <input 
+                                        type="text" 
+                                        placeholder="가족코드 입력" 
+                                        value={inputCode}
+                                        onChange={(e) => setInputCode(e.target.value)}
+                                        className="bg-transparent text-xs px-2 py-1 outline-none w-24 focus:w-32 transition-all"
+                                    />
+                                    <button type="submit" className="bg-slate-700 text-white text-xs px-2.5 py-1 rounded-md hover:bg-slate-800">
+                                        연결
+                                    </button>
+                                </form>
 
-        {/* 메인 탭 메뉴 */}
-        <div className="flex border-b border-slate-200 mb-6 overflow-x-auto whitespace-nowrap scrollbar-none">
-          {[
-            { id: 'schedule', label: '📅 오늘의 시간표' },
-            { id: 'quest', label: '✅ 도전 퀘스트' },
-            { id: 'reward', label: '🎁 보상 상점' },
-            { id: 'board', label: '💬 응원 한마디' }
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-5 py-3 border-b-2 font-medium text-sm transition-all ${activeTab === tab.id ? 'border-indigo-600 text-indigo-600 font-bold' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {/* 탭 내부 콘텐츠 */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-          
-          {/* 1. 시간표 탭 */}
-          {activeTab === 'schedule' && (
-            <div>
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-bold text-slate-900">데일리 루틴 스케줄</h3>
-                <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded border border-emerald-100">✨ 평일 고정 모드</span>
-              </div>
-              <div className="relative border-l-2 border-slate-200 ml-4 pl-6 space-y-6">
-                {INITIAL_SCHEDULE.map((item) => (
-                  <div key={item.id} className="relative group">
-                    <div className="absolute -left-[31px] top-1 bg-white border-2 border-indigo-500 w-4 h-4 rounded-full group-hover:bg-indigo-500 transition-colors"></div>
-                    <div className="text-xs font-semibold text-indigo-600 mb-0.5">{item.time}</div>
-                    <h4 className="font-bold text-slate-800">{item.title}</h4>
-                    <p className="text-sm text-slate-500 mt-0.5">{item.desc}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* 2. 퀘스트 탭 */}
-          {activeTab === 'quest' && (
-            <div>
-              <h3 className="text-lg font-bold text-slate-900 mb-1">오늘의 도전 과제</h3>
-              <p className="text-xs text-slate-500 mb-4">할 일을 완료하고 스위치를 켜면 포인트가 적립돼요!</p>
-              
-              <div className="space-y-3">
-                {tasks.map((task) => (
-                  <div 
-                    key={task.id} 
-                    className={`flex items-center justify-between p-4 rounded-xl border transition-all ${task.completed ? 'bg-slate-50 border-slate-200 opacity-75' : 'bg-white border-slate-200 shadow-sm hover:border-slate-300'}`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-xl">
-                        {task.category === 'study' ? '📖' : task.category === 'health' ? '🏃' : task.category === 'chore' ? '🧹' : '🌱'}
-                      </span>
-                      <div>
-                        <p className={`font-semibold ${task.completed ? 'line-through text-slate-400' : 'text-slate-800'}`}>{task.text}</p>
-                        <span className="inline-block bg-amber-50 text-amber-700 text-[10px] px-1.5 py-0.5 rounded font-bold border border-amber-100">+{task.points}p</span>
-                      </div>
-                    </div>
-                    
-                    <button
-                      onClick={() => toggleTask(task.id)}
-                      disabled={role !== 'student'}
-                      className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-                        task.completed 
-                          ? 'bg-indigo-600 text-white shadow-sm' 
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      } ${role !== 'student' ? 'cursor-not-allowed opacity-50' : ''}`}
-                    >
-                      {task.completed ? '✅ 완료함' : '미완료'}
-                    </button>
-                  </div>
-                ))}
-              </div>
-              {role !== 'student' && (
-                <p className="text-xs text-center text-rose-500 mt-4 font-semibold">⚠️ 퀘스트 체크는 아들(👦) 계정에서만 변경할 수 있습니다.</p>
-              )}
-            </div>
-          )}
-
-          {/* 3. 보상 상점 탭 */}
-          {activeTab === 'reward' && (
-            <div>
-              <h3 className="text-lg font-bold text-slate-900 mb-1">포인트 교환소</h3>
-              <p className="text-xs text-slate-500 mb-4">모은 포인트로 부모님께 원하는 보상을 획득하세요.</p>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {rewards.map((reward) => (
-                  <div key={reward.id} className="border border-slate-200 rounded-xl p-4 flex flex-col justify-between shadow-sm bg-white">
-                    <div>
-                      <div className="bg-indigo-50 text-indigo-700 font-extrabold text-sm px-2 py-1 rounded w-max mb-3">
-                        {reward.cost} p
-                      </div>
-                      <p className="font-bold text-slate-800 text-sm mb-4">{reward.text}</p>
-                    </div>
-
-                    <div className="mt-auto">
-                      {reward.approved ? (
-                        <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 text-center text-xs py-2 rounded-lg font-bold">
-                          🎉 지급 완료
+                                <div className="flex bg-slate-100 rounded-lg p-1 border border-slate-200 text-xs font-medium">
+                                    <button onClick={() => setRole('student')} className={`px-3 py-1.5 rounded-md ${role === 'student' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>👦 아들</button>
+                                    <button onClick={() => setRole('mom')} className={`px-3 py-1.5 rounded-md ${role === 'mom' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>👩 엄마</button>
+                                    <button onClick={() => setRole('dad')} className={`px-3 py-1.5 rounded-md ${role === 'dad' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>👨 아빠</button>
+                                </div>
+                            </div>
                         </div>
-                      ) : reward.requested ? (
-                        role === 'student' ? (
-                          <div className="bg-amber-50 border border-amber-200 text-amber-700 text-center text-xs py-2 rounded-lg font-bold animate-pulse">
-                            ⏳ 부모님 승인 대기중
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => approveReward(reward.id, reward.cost)}
-                            className="w-full bg-rose-500 text-white text-xs py-2 rounded-lg font-bold hover:bg-rose-600 shadow-sm"
-                          >
-                            ✔️ 승인 및 포인트 차감
-                          </button>
-                        )
-                      ) : (
-                        <button
-                          onClick={() => requestReward(reward.id)}
-                          disabled={role !== 'student'}
-                          className={`w-full text-xs py-2 rounded-lg font-bold transition-all ${
-                            role === 'student' 
-                              ? 'bg-slate-800 text-white hover:bg-slate-900' 
-                              : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                          }`}
-                        >
-                          {role === 'student' ? '🎁 보상 신청하기' : '신청 대기'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+                    </header>
 
-          {/* 4. 가족 응원판 탭 */}
-          {activeTab === 'board' && (
-            <div>
-              <h3 className="text-lg font-bold text-slate-900 mb-1">우리 가족 소통방</h3>
-              <p className="text-xs text-slate-500 mb-4">가족들에게 따뜻한 응원의 메시지와 스티커를 남겨주세요.</p>
-              
-              <form onSubmit={addPraise} className="flex gap-2 mb-6">
-                <input 
-                  type="text" 
-                  value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
-                  placeholder={`${role === 'student' ? '부모님께 한마디!' : '아들에게 칭찬 한마디 남기기...'}`}
-                  className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-indigo-500 focus:bg-white transition-all"
-                />
-                <button type="submit" className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-indigo-700">
-                  등록
-                </button>
-              </form>
+                    <main className="max-w-5xl mx-auto px-4 py-6">
+                        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl p-6 text-white shadow-md mb-6 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-6">
+                            <div>
+                                <p className="text-indigo-100 text-sm font-medium">현재 보유 포인트</p>
+                                <h2 className="text-4xl font-extrabold mt-1">{points} <span className="text-xl font-normal">💎</span></h2>
+                            </div>
+                            <div className="bg-white/10 backdrop-blur-md rounded-xl p-4 flex-1 max-w-md border border-white/10">
+                                <div className="flex justify-between items-center mb-1 text-sm font-bold">
+                                    <span>현재 등급: {getLevel().name}</span>
+                                </div>
+                                <p className="text-xs text-indigo-200">{getLevel().next}</p>
+                                <div className="w-full bg-white/20 h-2 rounded-full mt-3 overflow-hidden">
+                                    <div className="bg-amber-400 h-full transition-all duration-500" style={{ width: `${Math.min((points / 500) * 100, 100)}%` }}></div>
+                                </div>
+                            </div>
+                        </div>
 
-              <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
-                {praises.map((praise) => (
-                  <div key={praise.id} className="bg-slate-50 rounded-xl p-3 border border-slate-150 flex justify-between items-start">
-                    <div>
-                      <span className={`inline-block text-[10px] px-2 py-0.5 rounded-full font-bold mb-1 ${
-                        praise.from === '엄마' ? 'bg-rose-100 text-rose-700' : praise.from === '아빠' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
-                      }`}>
-                        {praise.from}
-                      </span>
-                      <p className="text-sm text-slate-700 font-medium">{praise.text}</p>
-                    </div>
-                    <span className="text-[10px] text-slate-400">{praise.time}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+                        <div className="flex border-b border-slate-200 mb-6 overflow-x-auto whitespace-nowrap">
+                            {[
+                                { id: 'schedule', label: '📅 오늘의 시간표' },
+                                { id: 'quest', label: '✅ 도전 퀘스트' },
+                                { id: 'reward', label: '🎁 보상 상점' },
+                                { id: 'board', label: '💬 응원 한마디' }
+                            ].map(tab => (
+                                <button
+                                    key={tab.id}
+                                    onClick={() => setActiveTab(tab.id)}
+                                    className={`px-5 py-3 border-b-2 font-medium text-sm transition-all ${activeTab === tab.id ? 'border-indigo-600 text-indigo-600 font-bold' : 'border-transparent text-slate-500'}`}
+                                >
+                                    {tab.label}
+                                </button>
+                            ))}
+                        </div>
 
-        </div>
-      </main>
-      
-      <footer className="max-w-5xl mx-auto px-4 py-8 text-center text-xs text-slate-400">
-        <p>© 2026 초등 6학년 갓생 플래너 시스템 • 가족 공유 모드 활성화 중</p>
-      </footer>
-    </div>
-  );
-}
+                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                            {activeTab === 'schedule' && (
+                                <div>
+                                    <div className="flex justify-between items-center mb-4">
+                                        <h3 className="text-lg font-bold text-slate-900">데일리 루틴 스케줄</h3>
+                                        <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded border border-emerald-100">✨ 평일 고정 모드</span>
+                                    </div>
+                                    <div className="relative border-l-2 border-slate-200 ml-4 pl-6 space-y-6">
+                                        {INITIAL_SCHEDULE.map((item) => (
+                                            <div key={item.id} className="relative group">
+                                                <div className="absolute -left-[31px] top-1 bg-white border-2 border-indigo-500 w-4 h-4 rounded-full"></div>
+                                                <div className="text-xs font-semibold text-indigo-600 mb-0.5">{item.time}</div>
+                                                <h4 className="font-bold text-slate-800">{item.title}</h4>
+                                                <p className="text-sm text-slate-500 mt-0.5">{item.desc}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {activeTab === 'quest' && (
+                                <div>
+                                    <h3 className="text-lg font-bold text-slate-900 mb-1">오늘의 도전 과제</h3>
+                                    <p className="text-xs text-slate-500 mb-4">할 일을 완료하고 완료 버튼을 누르면 포인트가 적립돼요!</p>
+                                    <div className="space-y-3">
+                                        {tasks.map((task) => (
+                                            <div key={task.id} className={`flex items-center justify-between p-4 rounded-xl border ${task.completed ? 'bg-slate-50 opacity-75' : 'bg-white shadow-sm'}`}>
+                                                <div className="flex items-center gap-3">
+                                                    <span className="text-xl">{task.category === 'study' ? '📖' : task.category === 'health' ? '🏃' : task.category === 'chore' ? '🧹' : '🌱'}</span>
+                                                    <div>
+                                                        <p className={`font-semibold ${task.completed ? 'line-through text-slate-400' : 'text-slate-800'}`}>{task.text}</p>
+                                                        <span className="inline-block bg-amber-50 text-amber-700 text-[10px] px-1.5 py-0.5 rounded font-bold border border-amber-100">+{task.points}p</span>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    onClick={() => toggleTask(task.id)}
+                                                    disabled={role !== 'student'}
+                                                    className={`px-4 py-2 rounded-lg text-xs font-bold ${task.completed ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'} ${role !== 'student' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                >
+                                                    {task.completed ? '✅ 완료함' : '미완료'}
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {activeTab === 'reward' && (
+                                <div>
+                                    <h3 className="text-lg font-bold text-slate-900 mb-1">포인트 교환소</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                                        {rewards.map((reward) => (
+                                            <div key={reward.id} className="border border-slate-200 rounded-xl p-4 flex flex-col justify-between shadow-sm bg-white">
+                                                <div>
+                                                    <div className="bg-indigo-50 text-indigo-700 font-extrabold text-sm px-2 py-1 rounded w-max mb-3">{reward.cost} p</div>
+                                                    <p className="font-bold text-slate-800 text-sm mb-4">{reward.text}</p>
+                                                </div>
+                                                <div>
+                                                    {reward.approved ? (
+                                                        <div className="bg-emerald-50 text-emerald-700 text-center text-xs py-2 rounded-lg font-bold">🎉 지급 완료</div>
+                                                    ) : reward.requested ? (
+                                                        role === 'student' ? (
+                                                            <div className="bg-amber-50 text-amber-700 text-center text-xs py-2 rounded-lg font-bold">⏳ 승인 대기중</div>
+                                                        ) : (
+                                                            <button onClick={() => approveReward(reward.id, reward.cost)} className="w-full bg-rose-500 text-white text-xs py-2 rounded-lg font-bold hover:bg-rose-600">✔️ 승인 및 포인트 차감</button>
+                                                        )
+                                                    ) : (
+                                                        <button onClick={() => requestReward(reward.id)} disabled={role !== 'student'} className={`w-full text-xs py-2 rounded-lg font-bold ${role === 'student' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                                                            {role === 'student' ? '🎁 보상 신청' : '신청 대기'}
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {activeTab === 'board' && (
+                                <div>
+                                    <h3 className="text-lg font-bold text-slate-900 mb-4">우리 가족 소통방</h3>
+                                    <form onSubmit={addPraise} className="flex gap-2 mb-6">
+                                        <input 
+                                            type="text" 
+                                            value={newMessage}
+                                            onChange={(e) => setNewMessage(e.target.value)}
+                                            placeholder="가족에게 한마디 남겨주세요..."
+                                            className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:bg-white focus:border-indigo-500"
+                                        />
+                                        <button type="submit" className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-bold">등록</button>
+                                    </form>
+                                    <div className="space-y-3">
+                                        {praises.map((praise) => (
+                                            <div key={praise.id} className="bg-slate-50 rounded-xl p-3 border border-slate-100 flex justify-between items-start">
+                                                <div>
+                                                    <span className={`inline-block text-[10px] px-2 py-0.5 rounded-full font-bold mb-1 ${praise.from === '엄마' ? 'bg-rose-100 text-rose-700' : praise.from === '아빠' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>{praise.from}</span>
+                                                    <p className="text-sm text-slate-700 font-medium">{praise.text}</p>
+                                                </div>
+                                                <span className="text-[10px] text-slate-400">{praise.time}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </main>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
