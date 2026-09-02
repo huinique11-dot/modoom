@@ -1211,7 +1211,7 @@
         // ---------------------------------------------------------------
         // Settings tab
         // ---------------------------------------------------------------
-        function SettingsTab({ classCode, firebaseConfigText, setFirebaseConfigText, applyFirebaseConfig, connected, googleClientId, setGoogleClientId, google, data, updateData }) {
+        function SettingsTab({ classCode, firebaseConfigText, setFirebaseConfigText, applyFirebaseConfig, connected, syncError, googleClientId, setGoogleClientId, google, data, updateData }) {
             const [exportBusy, setExportBusy] = useState(false);
             const [exportMsg, setExportMsg] = useState('');
             const fileInputRef = useRef(null);
@@ -1255,6 +1255,9 @@
                             <button onClick={applyFirebaseConfig} className="bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-indigo-700">적용</button>
                             <span className={`text-xs font-bold ${connected ? 'text-emerald-600' : 'text-slate-400'}`}>{connected ? '● 연결됨' : '○ 미연결(로컬 저장 모드)'}</span>
                         </div>
+                        {syncError && (
+                            <p className="text-xs text-rose-600 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2 mt-2">⚠️ {syncError}</p>
+                        )}
                     </section>
 
                     <section>
@@ -1298,9 +1301,12 @@
         // ---------------------------------------------------------------
         // App shell
         // ---------------------------------------------------------------
-        function ClassSwitcher({ classCode, classCodes, onSwitch, onCreate, onRemove }) {
+        function ClassSwitcher({ classCode, classCodes, onSwitch, onCreate, onRemove, onRename }) {
             const [open, setOpen] = useState(false);
             const [newCode, setNewCode] = useState('');
+            const [editingCode, setEditingCode] = useState(null);
+            const [editValue, setEditValue] = useState('');
+
             const create = () => {
                 const code = newCode.trim();
                 if (!code) return;
@@ -1308,6 +1314,13 @@
                 setNewCode('');
                 setOpen(false);
             };
+            const startEdit = (code) => { setEditingCode(code); setEditValue(code); };
+            const commitEdit = () => {
+                if (editingCode) onRename(editingCode, editValue);
+                setEditingCode(null);
+                setEditValue('');
+            };
+
             return (
                 <div className="relative">
                     <button onClick={() => setOpen(!open)} className="flex items-center gap-1 bg-indigo-50 text-indigo-700 text-xs px-2.5 py-1.5 rounded-full font-semibold border border-indigo-100">
@@ -1315,20 +1328,28 @@
                     </button>
                     {open && (
                         <React.Fragment>
-                            <div className="fixed inset-0 z-40" onClick={() => setOpen(false)}></div>
-                            <div className="absolute left-0 top-full mt-1 w-52 bg-white border border-slate-200 rounded-xl shadow-lg z-50 overflow-hidden">
+                            <div className="fixed inset-0 z-40" onClick={() => { setOpen(false); setEditingCode(null); }}></div>
+                            <div className="absolute left-0 top-full mt-1 w-64 bg-white border border-slate-200 rounded-xl shadow-lg z-50 overflow-hidden">
                                 <p className="text-[10px] font-bold text-slate-400 px-3 pt-2 pb-1">학급 선택</p>
                                 <div className="max-h-56 overflow-y-auto">
                                     {classCodes.map(code => (
-                                        <div key={code} className={`flex items-center justify-between hover:bg-slate-50 ${code === classCode ? 'bg-indigo-50' : ''}`}>
-                                            <button onClick={() => { onSwitch(code); setOpen(false); }}
-                                                className={`flex-1 text-left px-3 py-2 text-sm ${code === classCode ? 'text-indigo-700 font-bold' : 'text-slate-700'}`}>
-                                                {code}
-                                            </button>
-                                            {code !== classCode && (
+                                        editingCode === code ? (
+                                            <div key={code} className="flex items-center gap-1 px-2 py-1.5 bg-slate-50">
+                                                <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)}
+                                                    onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditingCode(null); }}
+                                                    className="flex-1 border rounded-lg px-2 py-1 text-xs outline-none focus:border-indigo-500" />
+                                                <button onClick={commitEdit} className="text-xs bg-indigo-600 text-white px-2 py-1 rounded-lg font-bold">저장</button>
+                                            </div>
+                                        ) : (
+                                            <div key={code} className={`flex items-center justify-between hover:bg-slate-50 ${code === classCode ? 'bg-indigo-50' : ''}`}>
+                                                <button onClick={() => { onSwitch(code); setOpen(false); }}
+                                                    className={`flex-1 text-left px-3 py-2 text-sm ${code === classCode ? 'text-indigo-700 font-bold' : 'text-slate-700'}`}>
+                                                    {code}
+                                                </button>
+                                                <button onClick={(e) => { e.stopPropagation(); startEdit(code); }} className="px-1.5 text-slate-300 hover:text-indigo-600 text-xs">✏️</button>
                                                 <button onClick={(e) => { e.stopPropagation(); onRemove(code); }} className="px-2 text-slate-300 hover:text-rose-500 text-xs">×</button>
-                                            )}
-                                        </div>
+                                            </div>
+                                        )
                                     ))}
                                 </div>
                                 <div className="border-t border-slate-100 p-2 flex gap-1">
@@ -1360,6 +1381,7 @@
             const [googleClientId, setGoogleClientIdState] = useState(localStorage.getItem('sga_googleClientId') || '');
             const [db, setDb] = useState(null);
             const [connected, setConnected] = useState(false);
+            const [syncError, setSyncError] = useState('');
             const [data, setData] = useState(DEFAULT_DATA);
             const [activeTab, setActiveTab] = useState('roster');
 
@@ -1370,6 +1392,7 @@
             const applyFirebaseConfig = () => {
                 try {
                     const parsed = parseFirebaseConfigInput(firebaseConfigText);
+                    setSyncError('');
                     setFirebaseConfig(parsed);
                     localStorage.setItem('sga_firebaseConfig', parsed ? JSON.stringify(parsed) : '');
                 } catch (e) { alert(e.message); }
@@ -1377,15 +1400,25 @@
 
             useEffect(() => {
                 if (!firebaseConfig) { setDb(null); setConnected(false); return; }
+                let cancelled = false;
                 try {
-                    const app = window.firebase.apps.length ? window.firebase.app() : window.firebase.initializeApp(firebaseConfig);
-                    const firestore = window.firebase.firestore();
-                    window.firebase.auth().signInAnonymously().catch(err => console.error('anon auth failed', err));
-                    setDb(firestore);
+                    window.firebase.apps.length ? window.firebase.app() : window.firebase.initializeApp(firebaseConfig);
+                    const auth = window.firebase.auth();
+                    const unsubAuth = auth.onAuthStateChanged(user => {
+                        if (cancelled) return;
+                        if (user) { setSyncError(''); setDb(window.firebase.firestore()); }
+                    });
+                    auth.signInAnonymously().catch(err => {
+                        if (cancelled) return;
+                        setConnected(false);
+                        setSyncError('Firebase 로그인 실패: ' + err.message + ' — Authentication에서 "익명" 로그인이 켜져 있는지 확인하세요.');
+                    });
+                    return () => { cancelled = true; unsubAuth(); };
                 } catch (e) {
                     console.error(e);
                     setDb(null);
                     setConnected(false);
+                    setSyncError('Firebase 설정 오류: ' + e.message);
                 }
             }, [firebaseConfig]);
 
@@ -1394,10 +1427,15 @@
                 const unsub = db.collection('classes').doc(classCode).onSnapshot(
                     snap => {
                         setConnected(true);
+                        setSyncError('');
                         if (snap.exists) setData({ ...DEFAULT_DATA, ...snap.data() });
                         else db.collection('classes').doc(classCode).set(DEFAULT_DATA);
                     },
-                    err => { console.error(err); setConnected(false); }
+                    err => {
+                        console.error(err);
+                        setConnected(false);
+                        setSyncError('동기화 실패: ' + err.message + ' — Firestore Database를 만들었는지, 보안 규칙을 게시했는지 확인하세요.');
+                    }
                 );
                 return () => unsub();
             }, [db, classCode]);
@@ -1434,11 +1472,46 @@
                 switchClass(code);
             };
             const removeClassCode = (code) => {
-                setClassCodes(prev => {
-                    const next = prev.filter(c => c !== code);
+                if (!window.confirm(`'${code}' 학급을 목록에서 삭제할까요? (저장된 데이터는 남아있어서 같은 이름으로 다시 추가하면 복구돼요)`)) return;
+                const next = classCodes.filter(c => c !== code);
+                if (code === classCode) {
+                    const fallback = next[0] || 'default';
+                    if (!next.includes(fallback)) next.push(fallback);
+                    setClassCode(fallback);
+                    localStorage.setItem('sga_classCode', fallback);
+                }
+                setClassCodes(next);
+                localStorage.setItem('sga_classCodes', JSON.stringify(next));
+            };
+
+            const renameClassCode = async (oldCode, newCodeRaw) => {
+                const newCode = newCodeRaw.trim();
+                if (!newCode || newCode === oldCode) return;
+                if (classCodes.includes(newCode)) { alert(`'${newCode}' 학급이 이미 있어요. 다른 이름을 써주세요.`); return; }
+                try {
+                    if (db) {
+                        const oldRef = db.collection('classes').doc(oldCode);
+                        const snap = await oldRef.get();
+                        const oldData = snap.exists ? snap.data() : DEFAULT_DATA;
+                        await db.collection('classes').doc(newCode).set(oldData);
+                        await oldRef.delete();
+                    } else {
+                        const raw = localStorage.getItem(`sga_data_${oldCode}`);
+                        if (raw) {
+                            localStorage.setItem(`sga_data_${newCode}`, raw);
+                            localStorage.removeItem(`sga_data_${oldCode}`);
+                        }
+                    }
+                    const next = classCodes.map(c => c === oldCode ? newCode : c);
+                    setClassCodes(next);
                     localStorage.setItem('sga_classCodes', JSON.stringify(next));
-                    return next;
-                });
+                    if (classCode === oldCode) {
+                        setClassCode(newCode);
+                        localStorage.setItem('sga_classCode', newCode);
+                    }
+                } catch (e) {
+                    alert('학급 이름 변경 중 문제가 발생했습니다: ' + e.message);
+                }
             };
 
             useEffect(() => {
@@ -1464,9 +1537,11 @@
                             <div className="flex items-center gap-3">
                                 <span className="text-2xl">🧩</span>
                                 <h1 className="text-lg sm:text-xl font-bold text-indigo-600">모둠 활동 도우미</h1>
-                                <span className={`text-xs font-bold ${connected ? 'text-emerald-600' : 'text-slate-400'}`}>{connected ? '● 동기화됨' : '○ 이 기기에만 저장'}</span>
+                                <span className={`text-xs font-bold ${connected ? 'text-emerald-600' : firebaseConfig ? 'text-rose-500' : 'text-slate-400'}`}>
+                                    {connected ? '● 동기화됨' : firebaseConfig ? '● 연결 안 됨' : '○ 이 기기에만 저장'}
+                                </span>
                             </div>
-                            <ClassSwitcher classCode={classCode} classCodes={classCodes} onSwitch={switchClass} onCreate={createClass} onRemove={removeClassCode} />
+                            <ClassSwitcher classCode={classCode} classCodes={classCodes} onSwitch={switchClass} onCreate={createClass} onRemove={removeClassCode} onRename={renameClassCode} />
                         </div>
                     </header>
 
@@ -1491,6 +1566,7 @@
                                     setFirebaseConfigText={setFirebaseConfigText}
                                     applyFirebaseConfig={applyFirebaseConfig}
                                     connected={connected}
+                                    syncError={syncError}
                                     googleClientId={googleClientId}
                                     setGoogleClientId={setGoogleClientId}
                                     google={google}
