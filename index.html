@@ -41,6 +41,85 @@
 
         const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
         const todayStr = () => new Date().toISOString().slice(0, 10);
+
+        // ---------------------------------------------------------------
+        // First-visit demo class — so a brand new user immediately sees
+        // every tab with a little sample data instead of a blank app.
+        // Names are cartoon characters, not real students. Deletable like
+        // any other class via the class switcher's × button.
+        // ---------------------------------------------------------------
+        const DEMO_CLASS_CODE = '예시';
+        const demoDateStr = (daysAgo) => new Date(Date.now() - daysAgo * 86400000).toISOString().slice(0, 10);
+        const demoCreatedAt = (daysAgo) => Date.now() - daysAgo * 86400000;
+
+        const DEMO_DATA = (() => {
+            const students = [
+                { id: 'demo_s1', number: '1', name: '휘니크', gender: '여', score: '88', memo: '리코더 잘 붐' },
+                { id: 'demo_s2', number: '2', name: '둘리', gender: '남', score: '72', memo: '박자 감각 좋음' },
+                { id: 'demo_s3', number: '3', name: '도우너', gender: '남', score: '65', memo: '창작 아이디어 풍부' },
+                { id: 'demo_s4', number: '4', name: '또치', gender: '여', score: '91', memo: '합주 리더십 좋음' },
+                { id: 'demo_s5', number: '5', name: '마이콜', gender: '남', score: '58', memo: '기초 다지는 중' },
+                { id: 'demo_s6', number: '6', name: '길동이', gender: '남', score: '77', memo: '성실하게 참여' },
+                { id: 'demo_s7', number: '7', name: '희동이', gender: '남', score: '69', memo: '리듬 악기 관심 많음' },
+                { id: 'demo_s8', number: '8', name: '철수', gender: '남', score: '83', memo: '노래 부르기 좋아함' },
+                { id: 'demo_s9', number: '9', name: '영희', gender: '여', score: '95', memo: '감상·비평 잘함' },
+                { id: 'demo_s10', number: '10', name: '꼴뚜기', gender: '남', score: '61', memo: '조금씩 느는 중' },
+            ];
+
+            const rounds = [{
+                id: 'demo_r1', name: '1회차', date: demoDateStr(3), createdAt: demoCreatedAt(3),
+                groups: [
+                    { id: 'demo_g1', name: '1모둠', memberIds: ['demo_s1', 'demo_s2', 'demo_s3'], leaderId: 'demo_s1' },
+                    { id: 'demo_g2', name: '2모둠', memberIds: ['demo_s4', 'demo_s5', 'demo_s6'], leaderId: 'demo_s4' },
+                    { id: 'demo_g3', name: '3모둠', memberIds: ['demo_s7', 'demo_s8', 'demo_s9', 'demo_s10'], leaderId: 'demo_s9' },
+                ],
+            }];
+
+            const groupRecords = [
+                { id: 'demo_gr1', roundId: 'demo_r1', groupId: 'demo_g1', date: demoDateStr(3), content: '리듬 악기 합주 연습, 손발이 잘 맞았어요.', createdAt: demoCreatedAt(3) },
+                { id: 'demo_gr2', roundId: 'demo_r1', groupId: 'demo_g2', date: demoDateStr(3), content: '가락 익히기에 집중, 다음 시간엔 화음 연습 예정.', createdAt: demoCreatedAt(3) },
+                { id: 'demo_gr3', roundId: 'demo_r1', groupId: 'demo_g3', date: demoDateStr(3), content: '인원이 많아 역할을 나눠서 연습했어요.', createdAt: demoCreatedAt(3) },
+            ];
+
+            const individualRecords = [
+                { id: 'demo_ir1', studentId: 'demo_s1', roundId: 'demo_r1', date: demoDateStr(10), category: '', tags: [], rating: 'good', content: '', createdAt: demoCreatedAt(10) },
+                { id: 'demo_ir2', studentId: 'demo_s1', roundId: 'demo_r1', date: demoDateStr(6), category: '', tags: [], rating: 'mid', content: '', createdAt: demoCreatedAt(6) },
+                { id: 'demo_ir3', studentId: 'demo_s1', roundId: 'demo_r1', date: demoDateStr(3), category: '자율활동', tags: ['실기·표현', '연습 태도'], rating: 'good', content: '리코더 운지가 정확하고 박자 감각이 뛰어남.', createdAt: demoCreatedAt(3) },
+                { id: 'demo_ir4', studentId: 'demo_s2', roundId: 'demo_r1', date: demoDateStr(6), category: '', tags: [], rating: 'good', content: '', createdAt: demoCreatedAt(6) },
+                { id: 'demo_ir5', studentId: 'demo_s2', roundId: 'demo_r1', date: demoDateStr(3), category: '', tags: [], rating: 'good', content: '', createdAt: demoCreatedAt(3) },
+                { id: 'demo_ir6', studentId: 'demo_s3', roundId: 'demo_r1', date: demoDateStr(3), category: '', tags: [], rating: 'mid', content: '', createdAt: demoCreatedAt(3) },
+                { id: 'demo_ir7', studentId: 'demo_s4', roundId: 'demo_r1', date: demoDateStr(6), category: '', tags: [], rating: 'good', content: '', createdAt: demoCreatedAt(6) },
+                { id: 'demo_ir8', studentId: 'demo_s4', roundId: 'demo_r1', date: demoDateStr(3), category: '수행평가', tags: ['협업·소통'], rating: 'good', content: '모둠 합주에서 박자를 이끌어주는 역할을 잘함.', createdAt: demoCreatedAt(3) },
+                { id: 'demo_ir9', studentId: 'demo_s5', roundId: 'demo_r1', date: demoDateStr(3), category: '', tags: [], rating: 'low', content: '', createdAt: demoCreatedAt(3) },
+                { id: 'demo_ir10', studentId: 'demo_s7', roundId: 'demo_r1', date: demoDateStr(3), category: '', tags: [], rating: 'mid', content: '', createdAt: demoCreatedAt(3) },
+                { id: 'demo_ir11', studentId: 'demo_s9', roundId: 'demo_r1', date: demoDateStr(3), category: '', tags: [], rating: 'good', content: '', createdAt: demoCreatedAt(3) },
+                { id: 'demo_ir12', studentId: 'demo_s9', roundId: 'demo_r1', date: demoDateStr(1), category: '자율활동', tags: ['감상·비평'], rating: null, content: '음악 감상 후 느낀 점을 논리적으로 잘 설명함.', createdAt: demoCreatedAt(1) },
+            ];
+
+            const sessionNotes = [
+                { id: 'demo_sn1', roundId: 'demo_r1', date: demoDateStr(3), content: '리듬 악기로 모둠별 합주를 연습했어요.', createdAt: demoCreatedAt(3) },
+            ];
+
+            const categories = ['자율활동', '수행평가'];
+
+            const progress = [
+                { id: 'demo_p1', lesson: '1', content: '리듬 악기 탐색 및 기본 주법 익히기', detail: '', updatedAt: demoCreatedAt(10) },
+                { id: 'demo_p2', lesson: '2', content: '모둠별 리듬 합주 연습', detail: '다음 시간엔 화음 쌓기로 이어갈 예정', updatedAt: demoCreatedAt(3) },
+            ];
+
+            return { students, rounds, groupRecords, individualRecords, sessionNotes, categories, progress, classroomLayout: {} };
+        })();
+
+        function seedDemoClassIfFirstVisit() {
+            try {
+                if (localStorage.getItem('sga_classCodes') !== null) return; // not a fresh install
+                if (!localStorage.getItem(`sga_data_${DEMO_CLASS_CODE}`)) {
+                    localStorage.setItem(`sga_data_${DEMO_CLASS_CODE}`, JSON.stringify(DEMO_DATA));
+                }
+                localStorage.setItem('sga_classCode', DEMO_CLASS_CODE);
+                localStorage.setItem('sga_classCodes', JSON.stringify([DEMO_CLASS_CODE]));
+            } catch (e) { /* localStorage unavailable — app still works without the demo seed */ }
+        }
         const shuffle = (arr) => {
             const a = [...arr];
             for (let i = a.length - 1; i > 0; i--) {
@@ -2176,6 +2255,7 @@
         }
 
         function App() {
+            seedDemoClassIfFirstVisit();
             const [classCode, setClassCode] = useState(localStorage.getItem('sga_classCode') || 'default');
             const [classCodes, setClassCodes] = useState(() => {
                 try {
