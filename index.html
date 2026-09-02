@@ -679,7 +679,16 @@
             const [bulkMsg, setBulkMsg] = useState('');
             const [manageGroups, setManageGroups] = useState(false);
             const [showAddForm, setShowAddForm] = useState(false);
+            const [quickName, setQuickName] = useState('');
             const fileRef = useRef(null);
+
+            const quickAdd = (e) => {
+                e.preventDefault();
+                const name = quickName.trim();
+                if (!name) return;
+                updateData(prev => ({ ...prev, students: [...prev.students, { id: uid(), number: '', name, gender: '', score: '', memo: '' }] }));
+                setQuickName('');
+            };
 
             const formatBulkSummary = (summary) => {
                 const ok = summary.filter(s => !s.error);
@@ -775,11 +784,17 @@
                             <button onClick={() => setShowPaste(!showPaste)} className="text-xs bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded font-bold border border-indigo-100 hover:bg-indigo-100">
                                 {showPaste ? '닫기' : '📋 여러 명 붙여넣기'}
                             </button>
-                            <button onClick={() => setShowAddForm(!showAddForm)} className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded font-bold hover:bg-indigo-700">
-                                {showAddForm ? '닫기' : '＋ 학생추가'}
+                            <button onClick={() => setShowAddForm(!showAddForm)} className="text-xs bg-slate-100 text-slate-600 px-3 py-1.5 rounded font-bold hover:bg-slate-200">
+                                {showAddForm ? '닫기' : '＋ 번호·성별 등 자세히 추가'}
                             </button>
                         </div>
                     </div>
+
+                    <form onSubmit={quickAdd} className="flex gap-2 mb-4">
+                        <input value={quickName} onChange={e => setQuickName(e.target.value)} placeholder="이름 입력 후 Enter로 바로 추가 (번호 없이, 동아리 명단 등에 편리해요)"
+                            className="flex-1 border rounded-lg px-3 py-2 text-sm outline-none focus:border-indigo-500" />
+                        <button type="submit" className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-indigo-700 shrink-0">＋ 추가</button>
+                    </form>
 
                     {showPaste && (
                         <div className="mb-6 p-4 bg-slate-50 border border-slate-200 rounded-xl">
