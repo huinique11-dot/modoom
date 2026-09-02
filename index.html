@@ -8,6 +8,7 @@
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <!-- Firebase (compat build) powers cross-device sync. Inert until a user supplies their own project config in 설정. -->
     <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
@@ -116,6 +117,139 @@
             return s ? `${s.number ? s.number + '번 ' : ''}${s.name}` : '(삭제된 학생)';
         }
 
+        // ---------------------------------------------------------------
+        // Shared visual bits for "clustered" group cards
+        // ---------------------------------------------------------------
+        const GROUP_PALETTE = [
+            { bg: 'bg-indigo-50', border: 'border-indigo-200', text: 'text-indigo-700', dot: 'bg-indigo-500', ring: 'ring-indigo-300' },
+            { bg: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', dot: 'bg-rose-500', ring: 'ring-rose-300' },
+            { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', dot: 'bg-emerald-500', ring: 'ring-emerald-300' },
+            { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', dot: 'bg-amber-500', ring: 'ring-amber-300' },
+            { bg: 'bg-sky-50', border: 'border-sky-200', text: 'text-sky-700', dot: 'bg-sky-500', ring: 'ring-sky-300' },
+            { bg: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', dot: 'bg-violet-500', ring: 'ring-violet-300' },
+            { bg: 'bg-pink-50', border: 'border-pink-200', text: 'text-pink-700', dot: 'bg-pink-500', ring: 'ring-pink-300' },
+            { bg: 'bg-teal-50', border: 'border-teal-200', text: 'text-teal-700', dot: 'bg-teal-500', ring: 'ring-teal-300' },
+        ];
+        const paletteFor = (idx) => GROUP_PALETTE[idx % GROUP_PALETTE.length];
+        const isLeaderNote = (s) => /조장|리더|앵커|멘토/.test(s.note || s.role || '');
+        const mbtiChipClass = (mbti) => mbti === 'E' ? 'bg-amber-100 text-amber-700 border-amber-200'
+            : mbti === 'I' ? 'bg-sky-100 text-sky-700 border-sky-200'
+            : 'bg-slate-100 text-slate-600 border-slate-200';
+
+        function MemberChip({ student, onClick, onDragStart, draggable, selected, showRemove, onRemove }) {
+            if (!student) return null;
+            return (
+                <span
+                    draggable={draggable}
+                    onDragStart={onDragStart}
+                    onClick={onClick}
+                    className={`inline-flex items-center gap-1 pl-1 pr-2 py-1 rounded-full border text-xs font-semibold select-none ${mbtiChipClass(student.mbti)} ${draggable || onClick ? 'cursor-pointer' : ''} ${selected ? 'ring-2 ring-offset-1 ring-indigo-500' : ''}`}
+                    title={[student.mbti, student.role, student.note].filter(Boolean).join(' · ')}
+                >
+                    <span className="w-5 h-5 rounded-full bg-white/80 border border-current/20 flex items-center justify-center text-[10px] font-bold">
+                        {student.name ? student.name.slice(-2, -1) || student.name.slice(0, 1) : '?'}
+                    </span>
+                    <span>{student.name}{isLeaderNote(student) && ' 👑'}</span>
+                    {showRemove && (
+                        <button onClick={(e) => { e.stopPropagation(); onRemove(); }} className="ml-0.5 text-current/60 hover:text-rose-600 font-bold">×</button>
+                    )}
+                </span>
+            );
+        }
+
+        function GroupCluster({ group, idx, students, interactive, dropReady, onDropStudent, onDragOverAllow, children }) {
+            const pal = paletteFor(idx);
+            const members = group.memberIds.map(id => students.find(s => s.id === id)).filter(Boolean);
+            const eCount = members.filter(m => m.mbti === 'E').length;
+            const iCount = members.filter(m => m.mbti === 'I').length;
+            const scores = members.map(m => Number(m.knowledge)).filter(n => !isNaN(n) && n !== 0);
+            const avg = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+            return (
+                <div
+                    onDragOver={interactive ? onDragOverAllow : undefined}
+                    onDrop={interactive ? onDropStudent : undefined}
+                    className={`relative p-3 rounded-2xl border-2 ${pal.bg} ${pal.border} ${dropReady ? `ring-2 ring-offset-1 ${pal.ring}` : ''} transition-shadow`}
+                >
+                    {children}
+                    <div className="flex flex-wrap gap-1.5 mt-2 min-h-[2.25rem]">
+                        {members.map(m => (
+                            <MemberChip key={m.id} student={m} draggable={interactive}
+                                onDragStart={interactive ? (e) => e.dataTransfer.setData('text/plain', m.id) : undefined} />
+                        ))}
+                        {members.length === 0 && <span className="text-xs text-slate-400 italic">비어있음</span>}
+                    </div>
+                    {(eCount + iCount > 0 || avg !== null) && (
+                        <p className={`text-[10px] mt-2 font-semibold ${pal.text}`}>
+                            {eCount + iCount > 0 && `E ${eCount} · I ${iCount}`}{eCount + iCount > 0 && avg !== null && ' · '}{avg !== null && `평균 ${avg}점`}
+                        </p>
+                    )}
+                </div>
+            );
+        }
+
+        function parseImportedSheet(rows) {
+            if (!rows || !rows.length) return { students: [], groups: [], roundName: '' };
+            const norm = (v) => (v === null || v === undefined) ? '' : String(v).trim();
+            const hasHeader = rows[0].some(c => norm(c) === '이름');
+            let header, dataRows;
+            if (hasHeader) {
+                header = rows[0].map(norm);
+                dataRows = rows.slice(1);
+            } else {
+                header = rows[0].length >= 9
+                    ? ['모둠', '학번', '이름', '학생 특성', '기타경험', '지식점수', 'MBTI', '선호역할', '배정사유']
+                    : ['모둠', '학번', '이름', '기타경험', '지식점수', 'MBTI', '선호역할', '배정사유'];
+                dataRows = rows;
+            }
+            const col = (label) => header.findIndex(h => h.includes(label));
+            const idxGroup = col('모둠'), idxNumber = col('학번'), idxName = col('이름');
+            const idxTrait = col('특성'), idxExp = col('경험'), idxKnowledge = col('지식') !== -1 ? col('지식') : col('점수');
+            const idxMbti = col('MBTI'), idxRole = col('역할'), idxReason = col('사유');
+
+            let roundName = '';
+            if (hasHeader) {
+                const lastKnownIdx = Math.max(idxGroup, idxNumber, idxName, idxTrait, idxExp, idxKnowledge, idxMbti, idxRole, idxReason);
+                const extra = header.slice(lastKnownIdx + 1).find(h => h && h.length > 4);
+                if (extra) roundName = extra.replace(/\s+/g, ' ').trim();
+            }
+
+            const students = [];
+            const groupMap = new Map();
+            dataRows.forEach(row => {
+                const name = idxName !== -1 ? norm(row[idxName]) : '';
+                if (!name || name === '이름') return;
+                const rawGroup = idxGroup !== -1 ? row[idxGroup] : null;
+                const groupName = (rawGroup === null || rawGroup === undefined || rawGroup === '') ? null
+                    : (typeof rawGroup === 'number' ? `${rawGroup}조` : norm(rawGroup));
+                const number = idxNumber !== -1 ? norm(row[idxNumber]) : '';
+                let mbti = '';
+                if (idxMbti !== -1 && row[idxMbti]) {
+                    const m = norm(row[idxMbti]).match(/^[EI]/i);
+                    mbti = m ? m[0].toUpperCase() : '';
+                }
+                let knowledge = '';
+                if (idxKnowledge !== -1 && row[idxKnowledge] !== null && row[idxKnowledge] !== undefined) {
+                    const m = norm(row[idxKnowledge]).match(/\d+/);
+                    knowledge = m ? m[0] : '';
+                }
+                let role = '';
+                if (idxRole !== -1 && row[idxRole]) role = norm(row[idxRole]).split(':')[0].trim();
+                const experience = idxExp !== -1 ? norm(row[idxExp]) : '';
+                const trait = idxTrait !== -1 ? norm(row[idxTrait]) : '';
+                const reason = idxReason !== -1 ? norm(row[idxReason]) : '';
+                const note = [trait, reason].filter(Boolean).join(' / ');
+
+                const student = { id: uid(), number, name, gender: '', mbti, role, knowledge, experience, note, memo: experience };
+                students.push(student);
+                if (groupName) {
+                    if (!groupMap.has(groupName)) groupMap.set(groupName, []);
+                    groupMap.get(groupName).push(student.id);
+                }
+            });
+            const groups = [...groupMap.entries()].map(([name, memberIds]) => ({ id: uid(), name, memberIds }));
+            return { students, groups, roundName };
+        }
+
         function buildSheetRows(data) {
             const rosterRows = [
                 ['번호', '이름', '성별', '메모'],
@@ -199,7 +333,7 @@
         // Roster tab
         // ---------------------------------------------------------------
         function RosterTab({ data, updateData, google }) {
-            const emptyForm = { number: '', name: '', gender: '', memo: '' };
+            const emptyForm = { number: '', name: '', gender: '', mbti: '', role: '', knowledge: '', memo: '' };
             const [form, setForm] = useState(emptyForm);
             const [editingId, setEditingId] = useState(null);
             const [pasteText, setPasteText] = useState('');
@@ -208,6 +342,10 @@
             const [sheetRange, setSheetRange] = useState('시트1!A1:D100');
             const [busy, setBusy] = useState(false);
             const [msg, setMsg] = useState('');
+            const [workbook, setWorkbook] = useState(null); // { fileName, sheets: { name: rows[][] } }
+            const [selectedSheet, setSelectedSheet] = useState('');
+            const [xlsxMsg, setXlsxMsg] = useState('');
+            const fileRef = useRef(null);
 
             const students = useMemo(() => [...data.students].sort(byNumberThenName), [data.students]);
 
@@ -224,7 +362,7 @@
                 setEditingId(null);
             };
 
-            const editStudent = (s) => { setForm({ number: s.number, name: s.name, gender: s.gender, memo: s.memo }); setEditingId(s.id); };
+            const editStudent = (s) => { setForm({ number: s.number, name: s.name, gender: s.gender || '', mbti: s.mbti || '', role: s.role || '', knowledge: s.knowledge || '', memo: s.memo || '' }); setEditingId(s.id); };
             const deleteStudent = (id) => {
                 if (!window.confirm('이 학생을 명단에서 삭제할까요? (기존 기록은 남아있습니다)')) return;
                 updateData(prev => ({ ...prev, students: prev.students.filter(s => s.id !== id) }));
@@ -278,12 +416,17 @@
                         </div>
                     )}
 
-                    <form onSubmit={submitForm} className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-6 p-4 bg-white border border-slate-200 rounded-xl shadow-sm">
-                        <input placeholder="번호" value={form.number} onChange={e => setForm({ ...form, number: e.target.value })} className="border rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500" />
+                    <form onSubmit={submitForm} className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 mb-6 p-4 bg-white border border-slate-200 rounded-xl shadow-sm">
+                        <input placeholder="번호/학번" value={form.number} onChange={e => setForm({ ...form, number: e.target.value })} className="border rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500" />
                         <input placeholder="이름*" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="border rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500" required />
                         <input placeholder="성별" value={form.gender} onChange={e => setForm({ ...form, gender: e.target.value })} className="border rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500" />
-                        <input placeholder="메모" value={form.memo} onChange={e => setForm({ ...form, memo: e.target.value })} className="border rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500 col-span-2 sm:col-span-1" />
-                        <div className="flex gap-1 col-span-2 sm:col-span-1">
+                        <select value={form.mbti} onChange={e => setForm({ ...form, mbti: e.target.value })} className="border rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500">
+                            <option value="">MBTI</option><option value="E">E</option><option value="I">I</option>
+                        </select>
+                        <input placeholder="선호역할" value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} className="border rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500" />
+                        <input placeholder="지식점수" value={form.knowledge} onChange={e => setForm({ ...form, knowledge: e.target.value })} className="border rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500" />
+                        <input placeholder="메모" value={form.memo} onChange={e => setForm({ ...form, memo: e.target.value })} className="border rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500" />
+                        <div className="flex gap-1">
                             <button type="submit" className="flex-1 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700">{editingId ? '수정' : '추가'}</button>
                             {editingId && <button type="button" onClick={() => { setForm(emptyForm); setEditingId(null); }} className="px-3 bg-slate-200 rounded-lg text-xs font-bold">취소</button>}
                         </div>
@@ -292,24 +435,92 @@
                     <div className="overflow-x-auto border border-slate-200 rounded-xl mb-8">
                         <table className="min-w-full text-sm">
                             <thead className="bg-slate-50 text-slate-500 text-xs">
-                                <tr><th className="px-3 py-2 text-left">번호</th><th className="px-3 py-2 text-left">이름</th><th className="px-3 py-2 text-left">성별</th><th className="px-3 py-2 text-left">메모</th><th className="px-3 py-2"></th></tr>
+                                <tr><th className="px-3 py-2 text-left">번호</th><th className="px-3 py-2 text-left">이름</th><th className="px-3 py-2 text-left">MBTI</th><th className="px-3 py-2 text-left">선호역할</th><th className="px-3 py-2 text-left">지식점수</th><th className="px-3 py-2 text-left">메모</th><th className="px-3 py-2"></th></tr>
                             </thead>
                             <tbody>
                                 {students.map(s => (
                                     <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50">
                                         <td className="px-3 py-2">{s.number}</td>
-                                        <td className="px-3 py-2 font-semibold">{s.name}</td>
-                                        <td className="px-3 py-2">{s.gender}</td>
-                                        <td className="px-3 py-2 text-slate-500">{s.memo}</td>
+                                        <td className="px-3 py-2 font-semibold">{s.name}{isLeaderNote(s) && ' 👑'}</td>
+                                        <td className="px-3 py-2">{s.mbti && <span className={`text-[10px] px-1.5 py-0.5 rounded border font-bold ${mbtiChipClass(s.mbti)}`}>{s.mbti}</span>}</td>
+                                        <td className="px-3 py-2 text-slate-500">{s.role}</td>
+                                        <td className="px-3 py-2 text-slate-500">{s.knowledge}</td>
+                                        <td className="px-3 py-2 text-slate-500 max-w-[16rem] truncate" title={s.memo}>{s.memo}</td>
                                         <td className="px-3 py-2 text-right whitespace-nowrap">
                                             <button onClick={() => editStudent(s)} className="text-[10px] px-2 py-1 bg-slate-100 rounded hover:bg-slate-200 font-medium mr-1">수정</button>
                                             <button onClick={() => deleteStudent(s.id)} className="text-[10px] px-2 py-1 bg-rose-50 text-rose-600 rounded hover:bg-rose-100 font-medium">삭제</button>
                                         </td>
                                     </tr>
                                 ))}
-                                {students.length === 0 && <tr><td colSpan="5" className="px-3 py-8 text-center text-slate-400">등록된 학생이 없습니다.</td></tr>}
+                                {students.length === 0 && <tr><td colSpan="7" className="px-3 py-8 text-center text-slate-400">등록된 학생이 없습니다.</td></tr>}
                             </tbody>
                         </table>
+                    </div>
+
+                    <div className="p-4 bg-white border border-slate-200 rounded-xl mb-6">
+                        <h4 className="font-bold text-sm mb-2">📁 엑셀(.xlsx) 파일로 명단·모둠 가져오기</h4>
+                        <p className="text-xs text-slate-500 mb-3">'모둠, 학번, 이름, MBTI, 선호역할, 지식점수, 배정사유' 등의 열이 있는 시트를 그대로 업로드하면 명단과 기존 모둠 배정을 함께 불러옵니다. 시트가 여러 개(예: 반별 시트)면 하나씩 골라 가져올 수 있습니다.</p>
+                        <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={(e) => {
+                            const file = e.target.files[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onload = (ev) => {
+                                try {
+                                    const wb = window.XLSX.read(ev.target.result, { type: 'array' });
+                                    const sheets = {};
+                                    wb.SheetNames.forEach(name => { sheets[name] = window.XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: null }); });
+                                    setWorkbook({ fileName: file.name, sheets });
+                                    setSelectedSheet(wb.SheetNames[0]);
+                                    setXlsxMsg('');
+                                } catch (err) { setXlsxMsg('엑셀 파일을 읽지 못했습니다: ' + err.message); }
+                            };
+                            reader.readAsArrayBuffer(file);
+                        }} className="text-xs mb-3" />
+
+                        {workbook && (
+                            <div>
+                                <div className="flex flex-wrap gap-1.5 mb-3">
+                                    {Object.keys(workbook.sheets).map(name => (
+                                        <button key={name} onClick={() => setSelectedSheet(name)}
+                                            className={`text-xs px-2.5 py-1.5 rounded-lg border font-bold ${selectedSheet === name ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-slate-200 hover:border-indigo-300'}`}>
+                                            {name}
+                                        </button>
+                                    ))}
+                                </div>
+                                {selectedSheet && (() => {
+                                    const parsed = parseImportedSheet(workbook.sheets[selectedSheet]);
+                                    return (
+                                        <div>
+                                            <p className="text-xs text-slate-600 mb-2">'{selectedSheet}' 시트: 학생 {parsed.students.length}명, 모둠 {parsed.groups.length}개 인식됨</p>
+                                            <div className="flex flex-wrap gap-2">
+                                                <button onClick={() => {
+                                                    updateData(prev => {
+                                                        const existingByNumber = new Map(prev.students.filter(s => s.number).map(s => [s.number, s]));
+                                                        const newStudents = parsed.students.filter(s => !s.number || !existingByNumber.has(s.number));
+                                                        const next = { ...prev, students: [...prev.students, ...newStudents] };
+                                                        if (parsed.groups.length) {
+                                                            const resolveId = (parsedId) => {
+                                                                const ps = parsed.students.find(s => s.id === parsedId);
+                                                                if (!ps) return parsedId;
+                                                                if (ps.number && existingByNumber.has(ps.number)) return existingByNumber.get(ps.number).id;
+                                                                return ps.id;
+                                                            };
+                                                            const groups = parsed.groups.map(g => ({ ...g, memberIds: g.memberIds.map(resolveId) }));
+                                                            next.rounds = [{ id: uid(), name: parsed.roundName || `${selectedSheet} 가져온 모둠`, date: todayStr(), groups, createdAt: Date.now() }, ...prev.rounds];
+                                                        }
+                                                        return next;
+                                                    });
+                                                    setXlsxMsg(`'${selectedSheet}' 시트를 현재 학급으로 가져왔습니다.`);
+                                                }} className="bg-emerald-600 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-emerald-700">
+                                                    현재 학급으로 가져오기
+                                                </button>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+                                {xlsxMsg && <p className="text-xs text-emerald-600 mt-2 font-medium">{xlsxMsg}</p>}
+                            </div>
+                        )}
                     </div>
 
                     <div className="p-4 bg-white border border-slate-200 rounded-xl">
@@ -343,7 +554,9 @@
             const [size, setSize] = useState(4);
             const [roundName, setRoundName] = useState('');
             const [draft, setDraft] = useState(null); // { groups, unassigned }
+            const [editingRoundId, setEditingRoundId] = useState(null);
             const [selectedStudent, setSelectedStudent] = useState(null);
+            const [dragOverGroupId, setDragOverGroupId] = useState(null);
             const [expandedRoundId, setExpandedRoundId] = useState(null);
 
             const groupCount = mode === 'groupCount' ? Math.max(1, Number(count) || 1) : Math.max(1, Math.ceil(students.length / Math.max(1, Number(size) || 1)));
@@ -351,8 +564,18 @@
             const startDraft = () => {
                 const groups = Array.from({ length: groupCount }, (_, i) => ({ id: uid(), name: `${i + 1}모둠`, memberIds: [] }));
                 setDraft({ groups, unassigned: students.map(s => s.id) });
+                setEditingRoundId(null);
                 setRoundName(`${new Date().toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' })} 모둠`);
                 setSelectedStudent(null);
+            };
+
+            const editRound = (round) => {
+                const assignedIds = new Set(round.groups.flatMap(g => g.memberIds));
+                setDraft({ groups: round.groups.map(g => ({ ...g, memberIds: [...g.memberIds] })), unassigned: students.filter(s => !assignedIds.has(s.id)).map(s => s.id) });
+                setEditingRoundId(round.id);
+                setRoundName(round.name);
+                setSelectedStudent(null);
+                setExpandedRoundId(null);
             };
 
             const randomFill = () => {
@@ -363,20 +586,34 @@
                 setDraft({ groups, unassigned: [] });
             };
 
-            const moveToGroup = (groupId) => {
-                if (!selectedStudent || !draft) return;
-                const groups = draft.groups.map(g => ({ ...g, memberIds: g.memberIds.filter(id => id !== selectedStudent) }));
+            const moveStudentToGroup = (studentId, groupId) => {
+                if (!studentId || !draft) return;
+                const groups = draft.groups.map(g => ({ ...g, memberIds: g.memberIds.filter(id => id !== studentId) }));
                 const target = groups.find(g => g.id === groupId);
-                target.memberIds.push(selectedStudent);
-                const unassigned = draft.unassigned.filter(id => id !== selectedStudent);
+                if (target) target.memberIds.push(studentId);
+                const unassigned = draft.unassigned.filter(id => id !== studentId);
                 setDraft({ groups, unassigned });
                 setSelectedStudent(null);
             };
 
-            const unassign = (studentId) => {
-                if (!draft) return;
+            const moveStudentToUnassigned = (studentId) => {
+                if (!studentId || !draft) return;
                 const groups = draft.groups.map(g => ({ ...g, memberIds: g.memberIds.filter(id => id !== studentId) }));
-                setDraft({ groups, unassigned: [...draft.unassigned, studentId] });
+                setDraft({ groups, unassigned: draft.unassigned.includes(studentId) ? draft.unassigned : [...draft.unassigned, studentId] });
+                setSelectedStudent(null);
+            };
+
+            const handleGroupClick = (groupId) => selectedStudent && moveStudentToGroup(selectedStudent, groupId);
+            const allowDrop = (groupId) => (e) => { e.preventDefault(); setDragOverGroupId(groupId); };
+            const handleDropOnGroup = (groupId) => (e) => {
+                e.preventDefault();
+                moveStudentToGroup(e.dataTransfer.getData('text/plain'), groupId);
+                setDragOverGroupId(null);
+            };
+            const handleDropOnUnassigned = (e) => {
+                e.preventDefault();
+                moveStudentToUnassigned(e.dataTransfer.getData('text/plain'));
+                setDragOverGroupId(null);
             };
 
             const addGroup = () => draft && setDraft({ ...draft, groups: [...draft.groups, { id: uid(), name: `${draft.groups.length + 1}모둠`, memberIds: [] }] });
@@ -389,10 +626,17 @@
 
             const saveRound = () => {
                 if (!draft || !roundName.trim()) return;
-                const round = { id: uid(), name: roundName.trim(), date: todayStr(), groups: draft.groups, createdAt: Date.now() };
-                updateData(prev => ({ ...prev, rounds: [round, ...prev.rounds] }));
+                if (editingRoundId) {
+                    updateData(prev => ({ ...prev, rounds: prev.rounds.map(r => r.id === editingRoundId ? { ...r, name: roundName.trim(), groups: draft.groups } : r) }));
+                } else {
+                    const round = { id: uid(), name: roundName.trim(), date: todayStr(), groups: draft.groups, createdAt: Date.now() };
+                    updateData(prev => ({ ...prev, rounds: [round, ...prev.rounds] }));
+                }
                 setDraft(null);
+                setEditingRoundId(null);
             };
+
+            const cancelDraft = () => { setDraft(null); setEditingRoundId(null); };
 
             const deleteRound = (id) => {
                 if (!window.confirm('이 회차의 모둠 배정을 삭제할까요?')) return;
@@ -426,47 +670,43 @@
                     ) : (
                         <div className="mb-8">
                             <div className="flex flex-wrap items-center gap-2 mb-4 p-4 bg-indigo-50 border border-indigo-100 rounded-xl">
+                                {editingRoundId && <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-1 rounded-full border border-amber-200">회차 수정 중</span>}
                                 <input value={roundName} onChange={e => setRoundName(e.target.value)} className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[160px]" placeholder="회차 이름" />
                                 <button onClick={randomFill} className="bg-white border border-indigo-200 text-indigo-700 text-xs font-bold px-3 py-2 rounded-lg hover:bg-indigo-100">🎲 무작위 배정</button>
                                 <button onClick={addGroup} className="bg-white border border-slate-200 text-slate-600 text-xs font-bold px-3 py-2 rounded-lg hover:bg-slate-100">＋ 모둠 추가</button>
                                 <button onClick={saveRound} className="bg-emerald-600 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-emerald-700">저장하기</button>
-                                <button onClick={() => setDraft(null)} className="bg-slate-200 text-slate-700 text-xs font-bold px-3 py-2 rounded-lg hover:bg-slate-300">취소</button>
+                                <button onClick={cancelDraft} className="bg-slate-200 text-slate-700 text-xs font-bold px-3 py-2 rounded-lg hover:bg-slate-300">취소</button>
                             </div>
-                            <p className="text-xs text-slate-500 mb-3">학생을 클릭해 선택한 뒤, 이동할 모둠을 클릭하면 교사가 직접 배정할 수 있어요.</p>
+                            <p className="text-xs text-slate-500 mb-3">학생을 클릭(또는 드래그)해서 이동할 모둠에 놓으면 자유롭게 재배정할 수 있어요. 이미 저장된 회차도 "수정"으로 다시 불러와 바꿀 수 있습니다.</p>
 
-                            {draft.unassigned.length > 0 && (
-                                <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                                    <p className="text-xs font-bold text-slate-500 mb-2">미배정 ({draft.unassigned.length}명)</p>
-                                    <div className="flex flex-wrap gap-2">
-                                        {draft.unassigned.map(id => (
-                                            <button key={id} onClick={() => setSelectedStudent(id)}
-                                                className={`text-xs px-2.5 py-1.5 rounded-lg border font-medium ${selectedStudent === id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-slate-200 hover:border-indigo-300'}`}>
-                                                {studentLabel(students, id)}
-                                            </button>
-                                        ))}
-                                    </div>
+                            <div onDragOver={(e) => e.preventDefault()} onDrop={handleDropOnUnassigned}
+                                className={`mb-4 p-3 border-2 border-dashed rounded-xl ${draft.unassigned.length ? 'bg-slate-50 border-slate-300' : 'bg-slate-50/50 border-slate-200'}`}>
+                                <p className="text-xs font-bold text-slate-500 mb-2">미배정 ({draft.unassigned.length}명) · 여기로 드래그하면 배정이 해제돼요</p>
+                                <div className="flex flex-wrap gap-2">
+                                    {draft.unassigned.map(id => {
+                                        const s = students.find(st => st.id === id);
+                                        return <MemberChip key={id} student={s} draggable
+                                            onDragStart={(e) => e.dataTransfer.setData('text/plain', id)}
+                                            selected={selectedStudent === id}
+                                            onClick={() => setSelectedStudent(selectedStudent === id ? null : id)} />;
+                                    })}
+                                    {draft.unassigned.length === 0 && <span className="text-xs text-slate-300">모든 학생이 배정되었습니다</span>}
                                 </div>
-                            )}
+                            </div>
 
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {draft.groups.map(g => (
-                                    <div key={g.id} onClick={() => selectedStudent && moveToGroup(g.id)}
-                                        className={`p-3 border rounded-xl bg-white ${selectedStudent ? 'cursor-pointer hover:border-indigo-400 hover:ring-2 hover:ring-indigo-100' : ''}`}>
-                                        <div className="flex justify-between items-center mb-2">
-                                            <input value={g.name} onClick={e => e.stopPropagation()} onChange={e => renameGroup(g.id, e.target.value)} className="font-bold text-sm border-b border-transparent hover:border-slate-300 focus:border-indigo-500 outline-none bg-transparent w-24" />
-                                            <button onClick={(e) => { e.stopPropagation(); removeGroup(g.id); }} className="text-[10px] text-rose-500 hover:underline">모둠 삭제</button>
+                                {draft.groups.map((g, idx) => (
+                                    <GroupCluster key={g.id} group={g} idx={idx} students={students} interactive
+                                        dropReady={dragOverGroupId === g.id}
+                                        onDragOverAllow={allowDrop(g.id)} onDropStudent={handleDropOnGroup(g.id)}>
+                                        <div onClick={() => handleGroupClick(g.id)} className={selectedStudent ? 'cursor-pointer' : ''}>
+                                            <div className="flex justify-between items-center">
+                                                <input value={g.name} onClick={e => e.stopPropagation()} onChange={e => renameGroup(g.id, e.target.value)}
+                                                    className="font-bold text-sm border-b border-transparent hover:border-slate-300 focus:border-indigo-500 outline-none bg-transparent w-24" />
+                                                <button onClick={(e) => { e.stopPropagation(); removeGroup(g.id); }} className="text-[10px] text-rose-500 hover:underline">모둠 삭제</button>
+                                            </div>
                                         </div>
-                                        <div className="flex flex-wrap gap-1.5 min-h-[2rem]">
-                                            {g.memberIds.map(id => (
-                                                <span key={id} onClick={(e) => { e.stopPropagation(); unassign(id); }}
-                                                    className="text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded-lg border border-indigo-100 cursor-pointer hover:bg-rose-50 hover:text-rose-600 hover:border-rose-100"
-                                                    title="클릭하면 미배정으로 이동">
-                                                    {studentLabel(students, id)}
-                                                </span>
-                                            ))}
-                                            {g.memberIds.length === 0 && <span className="text-xs text-slate-300">비어있음</span>}
-                                        </div>
-                                    </div>
+                                    </GroupCluster>
                                 ))}
                             </div>
                         </div>
@@ -481,15 +721,17 @@
                                         <span className="font-bold text-sm">{r.name}</span>
                                         <span className="text-xs text-slate-400 ml-2">{r.date} · 모둠 {r.groups.length}개</span>
                                     </div>
-                                    <button onClick={(e) => { e.stopPropagation(); deleteRound(r.id); }} className="text-[10px] px-2 py-1 bg-rose-50 text-rose-600 rounded hover:bg-rose-100 font-medium">삭제</button>
+                                    <div className="flex gap-1">
+                                        <button onClick={(e) => { e.stopPropagation(); editRound(r); }} className="text-[10px] px-2 py-1 bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100 font-medium">수정</button>
+                                        <button onClick={(e) => { e.stopPropagation(); deleteRound(r.id); }} className="text-[10px] px-2 py-1 bg-rose-50 text-rose-600 rounded hover:bg-rose-100 font-medium">삭제</button>
+                                    </div>
                                 </div>
                                 {expandedRoundId === r.id && (
                                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-3 pt-0">
-                                        {r.groups.map(g => (
-                                            <div key={g.id} className="p-2 bg-slate-50 rounded-lg border border-slate-100">
-                                                <p className="text-xs font-bold mb-1">{g.name}</p>
-                                                <p className="text-xs text-slate-500">{g.memberIds.map(id => studentLabel(students, id)).join(', ') || '비어있음'}</p>
-                                            </div>
+                                        {r.groups.map((g, idx) => (
+                                            <GroupCluster key={g.id} group={g} idx={idx} students={students} interactive={false}>
+                                                <p className="font-bold text-sm">{g.name}</p>
+                                            </GroupCluster>
                                         ))}
                                     </div>
                                 )}
@@ -531,13 +773,23 @@
                             </select>
                             {round && (
                                 <div className="space-y-6">
-                                    {round.groups.map(g => {
+                                    {round.groups.map((g, idx) => {
                                         const records = data.groupRecords.filter(r => r.roundId === round.id && r.groupId === g.id).sort((a, b) => b.createdAt - a.createdAt);
                                         const f = formByGroup[g.id] || { date: todayStr(), content: '' };
+                                        const pal = paletteFor(idx);
                                         return (
-                                            <div key={g.id} className="border border-slate-200 rounded-xl bg-white p-4">
-                                                <h4 className="font-bold text-sm mb-1">{g.name}</h4>
-                                                <p className="text-xs text-slate-400 mb-3">{g.memberIds.map(id => studentLabel(data.students, id)).join(', ') || '구성원 없음'}</p>
+                                            <div key={g.id} className={`border-2 rounded-xl bg-white p-4 ${pal.border}`}>
+                                                <div className={`flex items-center gap-2 mb-2 -m-4 mb-3 px-4 py-2 rounded-t-lg ${pal.bg}`}>
+                                                    <span className={`w-2.5 h-2.5 rounded-full ${pal.dot}`}></span>
+                                                    <h4 className={`font-bold text-sm ${pal.text}`}>{g.name}</h4>
+                                                </div>
+                                                <div className="flex flex-wrap gap-1.5 mb-3">
+                                                    {g.memberIds.map(id => {
+                                                        const s = data.students.find(st => st.id === id);
+                                                        return s ? <MemberChip key={id} student={s} /> : null;
+                                                    })}
+                                                    {g.memberIds.length === 0 && <span className="text-xs text-slate-300">구성원 없음</span>}
+                                                </div>
                                                 <div className="flex flex-wrap gap-2 mb-3">
                                                     <input type="date" value={f.date} onChange={e => setFormByGroup({ ...formByGroup, [g.id]: { ...f, date: e.target.value } })} className="border rounded-lg px-2 py-1.5 text-xs" />
                                                     <textarea value={f.content} onChange={e => setFormByGroup({ ...formByGroup, [g.id]: { ...f, content: e.target.value } })} placeholder="활동 내용 및 관찰 기록" rows="2" className="flex-1 min-w-[220px] border rounded-lg px-3 py-1.5 text-sm" />
