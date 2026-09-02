@@ -1388,7 +1388,7 @@
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                         <div>
                             <h3 className="text-lg font-bold text-slate-900">교실</h3>
-                            <p className="text-xs text-slate-400">{round.name} 기준 · ✋ 손잡이를 끌면 모둠 전체가 함께 움직이고, 이름표 하나씩 끌면 그 학생만 움직여요. 찰흙 만지듯 자유롭게 모양을 잡아보세요.</p>
+                            <p className="text-xs text-slate-400">{round.name} 기준 · 🧩 손잡이를 끌면 모둠 전체가 함께 움직이고, 이름표 하나씩 끌면 그 학생만 움직여요. 찰흙 만지듯 자유롭게 모양을 잡아보세요.</p>
                         </div>
                         <button onClick={resetLayout} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 font-bold shrink-0">↺ 기본 배치로</button>
                     </div>
@@ -1427,7 +1427,7 @@
                                     title={`${groups[gi].name} 전체 이동`}
                                     className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing rounded-full border-2 flex items-center justify-center shadow-sm ${pal.bg} ${pal.border} ${dragging ? 'shadow-lg scale-125 z-30' : 'z-10 opacity-80 hover:opacity-100'}`}
                                     style={{ left: `${h.x}%`, top: `${h.y}%`, width: '26px', height: '26px', touchAction: 'none', transition: dragging ? 'none' : 'box-shadow .15s, transform .15s' }}>
-                                    <span className="text-xs leading-none">✋</span>
+                                    <span className="text-xs leading-none">🧩</span>
                                 </div>
                             );
                         })}
