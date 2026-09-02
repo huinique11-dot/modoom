@@ -66,6 +66,28 @@
             URL.revokeObjectURL(url);
         };
 
+        async function copyToClipboard(text) {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(text);
+                return;
+            }
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+        }
+
+        function formatStudentRecordText(student, records) {
+            const lines = [...records].sort((a, b) => a.createdAt - b.createdAt).map(r =>
+                `[${r.date}] (${r.category || '구분없음'}${r.rating ? ' · ' + RATING_META[r.rating].label : ''}) ${[...(r.tags || []), r.content].filter(Boolean).join(' ')}`
+            ).join('\n');
+            return `${student.name}${student.number ? ' (' + student.number + '번)' : ''} 기록\n\n${lines || '(기록 없음)'}`;
+        }
+
         // ---------------------------------------------------------------
         // Google Identity Services + Sheets API (loaded lazily, no build step)
         // ---------------------------------------------------------------
@@ -235,7 +257,7 @@
             );
         }
 
-        function MemberChip({ student, onClick, onDragStart, draggable, selected, isLeader, hideLeaderEmoji, showRemove, onRemove }) {
+        function MemberChip({ student, onClick, onDragStart, draggable, selected, isLeader, hideLeaderEmoji, showRemove, onRemove, ratingDots }) {
             if (!student) return null;
             return (
                 <span
@@ -248,6 +270,11 @@
                         {student.name ? student.name.slice(-2, -1) || student.name.slice(0, 1) : '?'}
                     </span>
                     <span>{student.name}{isLeader && !hideLeaderEmoji && ' 👑'}</span>
+                    {ratingDots && ratingDots.length > 0 && (
+                        <span className="flex items-center gap-[2px] ml-0.5">
+                            {ratingDots.map((r, i) => <RatingDot key={i} rating={r} />)}
+                        </span>
+                    )}
                     {showRemove && (
                         <button onClick={(e) => { e.stopPropagation(); onRemove(); }} className="ml-0.5 text-current/60 hover:text-rose-600 font-bold">×</button>
                     )}
@@ -639,9 +666,9 @@
                             <tbody>
                                 {students.map(s => (
                                     <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50">
-                                        <td className="px-3 py-2">{s.number}</td>
-                                        <td className="px-3 py-2 font-semibold">{s.name}</td>
-                                        <td className="px-3 py-2 text-slate-500">{s.gender}</td>
+                                        <td className="px-3 py-2 whitespace-nowrap">{s.number}</td>
+                                        <td className="px-3 py-2 font-semibold whitespace-nowrap">{s.name}</td>
+                                        <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{s.gender}</td>
                                         <td className="px-3 py-2 text-slate-500 max-w-[16rem] truncate" title={s.memo}>{s.memo}</td>
                                         <td className="px-3 py-2 text-right whitespace-nowrap">
                                             <button onClick={() => editStudent(s)} className="text-[10px] px-2 py-1 bg-slate-100 rounded hover:bg-slate-200 font-medium mr-1">수정</button>
@@ -1120,11 +1147,18 @@
                                         </div>
                                         <div className="p-4">
                                             <div className="flex flex-wrap gap-1.5 mb-3">
-                                                {members.map(m => (
-                                                    <MemberChip key={m.id} student={m} isLeader={g.leaderId === m.id}
-                                                        selected={selectedMemberId === m.id}
-                                                        onClick={() => setSelectedMemberId(selectedMemberId === m.id ? null : m.id)} />
-                                                ))}
+                                                {members.map(m => {
+                                                    const ratingDots = data.individualRecords
+                                                        .filter(r => r.studentId === m.id && r.rating)
+                                                        .sort((a, b) => a.createdAt - b.createdAt)
+                                                        .map(r => r.rating)
+                                                        .slice(-10);
+                                                    return (
+                                                        <MemberChip key={m.id} student={m} isLeader={g.leaderId === m.id}
+                                                            selected={selectedMemberId === m.id} ratingDots={ratingDots}
+                                                            onClick={() => setSelectedMemberId(selectedMemberId === m.id ? null : m.id)} />
+                                                    );
+                                                })}
                                                 {members.length === 0 && <span className="text-xs text-slate-300">구성원 없음</span>}
                                             </div>
 
@@ -1181,17 +1215,42 @@
             const deleteRecord = (id) => updateData(prev => ({ ...prev, individualRecords: prev.individualRecords.filter(r => r.id !== id) }));
             const addCategory = (name) => updateData(prev => ({ ...prev, categories: prev.categories.includes(name) ? prev.categories : [...prev.categories, name] }));
 
-            const exportText = () => {
+            const [copyMsg, setCopyMsg] = useState('');
+            const [bulkCopyMsg, setBulkCopyMsg] = useState('');
+
+            const copySelectedText = async () => {
                 const s = students.find(s => s.id === studentId);
                 if (!s) return;
-                const lines = records.map(r => `[${r.date}] (${r.category || '구분없음'}${r.rating ? ' · ' + RATING_META[r.rating].label : ''}) ${[...(r.tags || []), r.content].filter(Boolean).join(' ')}`).join('\n');
-                downloadFile(`${s.name}_생기부기록.txt`, `${s.name} (${s.number}번) 기록\n\n${lines}`, 'text/plain');
+                try {
+                    await copyToClipboard(formatStudentRecordText(s, records));
+                    setCopyMsg('복사되었습니다!');
+                } catch (e) {
+                    setCopyMsg('복사에 실패했습니다: ' + e.message);
+                }
+                setTimeout(() => setCopyMsg(''), 2500);
+            };
+
+            const copyAllText = async () => {
+                const parts = students
+                    .map(s => ({ s, recs: data.individualRecords.filter(r => r.studentId === s.id) }))
+                    .filter(({ recs }) => recs.length)
+                    .map(({ s, recs }) => formatStudentRecordText(s, recs));
+                if (!parts.length) { setBulkCopyMsg('복사할 기록이 없습니다.'); setTimeout(() => setBulkCopyMsg(''), 2500); return; }
+                try {
+                    await copyToClipboard(parts.join('\n\n---\n\n'));
+                    setBulkCopyMsg(`전체 학생(${parts.length}명) 기록을 복사했습니다.`);
+                } catch (e) {
+                    setBulkCopyMsg('복사에 실패했습니다: ' + e.message);
+                }
+                setTimeout(() => setBulkCopyMsg(''), 3000);
             };
 
             return (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div>
                         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="학생 검색" className="w-full border rounded-lg px-3 py-2 text-sm mb-2" />
+                        <button onClick={copyAllText} className="w-full text-xs bg-indigo-50 text-indigo-700 px-3 py-2 rounded-lg font-bold border border-indigo-100 hover:bg-indigo-100 mb-1">📋 전체 학생 기록 한 번에 복사</button>
+                        {bulkCopyMsg && <p className="text-xs text-emerald-600 mb-2">{bulkCopyMsg}</p>}
                         <div className="border border-slate-200 rounded-xl bg-white max-h-[28rem] overflow-y-auto">
                             {filteredStudents.map(s => (
                                 <button key={s.id} onClick={() => setStudentId(s.id)} className={`w-full text-left px-3 py-2 text-sm border-b border-slate-50 hover:bg-slate-50 ${studentId === s.id ? 'bg-indigo-50 text-indigo-700 font-bold' : ''}`}>
@@ -1206,9 +1265,12 @@
                             <p className="text-sm text-slate-500">학생을 먼저 선택하세요.</p>
                         ) : (
                             <React.Fragment>
-                                <div className="flex justify-between items-center mb-3">
-                                    <h3 className="text-lg font-bold text-slate-900">{studentLabel(students, studentId)}의 기록</h3>
-                                    <button onClick={exportText} className="text-xs bg-slate-100 px-3 py-1.5 rounded-lg font-bold hover:bg-slate-200">📄 텍스트로 내보내기</button>
+                                <div className="mb-3">
+                                    <div className="flex justify-between items-center">
+                                        <h3 className="text-lg font-bold text-slate-900">{studentLabel(students, studentId)}의 기록</h3>
+                                        <button onClick={copySelectedText} className="text-xs bg-slate-100 px-3 py-1.5 rounded-lg font-bold hover:bg-slate-200">📋 텍스트로 복사하기</button>
+                                    </div>
+                                    {copyMsg && <p className="text-xs text-emerald-600 mt-1 text-right">{copyMsg}</p>}
                                 </div>
                                 <div className="p-4 bg-white border border-slate-200 rounded-xl mb-4 space-y-2">
                                     <div className="flex flex-wrap gap-2">
@@ -1269,13 +1331,27 @@
 
         function RecordTab({ data, updateData }) {
             const [mode, setMode] = useState('byRound');
+            const [manageGroups, setManageGroups] = useState(false);
+
+            if (manageGroups) {
+                return (
+                    <div>
+                        <button onClick={() => setManageGroups(false)} className="text-xs font-bold text-indigo-600 mb-4">← 활동 기록으로 돌아가기</button>
+                        <AssignTab data={data} updateData={updateData} />
+                    </div>
+                );
+            }
+
             return (
                 <div>
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                         <h3 className="text-lg font-bold text-slate-900">활동 기록</h3>
-                        <div className="flex bg-slate-100 rounded-lg p-1 text-xs font-medium">
-                            <button onClick={() => setMode('byRound')} className={`px-3 py-1.5 rounded-md ${mode === 'byRound' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>모둠별</button>
-                            <button onClick={() => setMode('byStudent')} className={`px-3 py-1.5 rounded-md ${mode === 'byStudent' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>학생별 전체보기</button>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button onClick={() => setManageGroups(true)} className="text-xs bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg font-bold border border-indigo-100 hover:bg-indigo-100">🎲 모둠 관리</button>
+                            <div className="flex bg-slate-100 rounded-lg p-1 text-xs font-medium">
+                                <button onClick={() => setMode('byRound')} className={`px-3 py-1.5 rounded-md ${mode === 'byRound' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>모둠별</button>
+                                <button onClick={() => setMode('byStudent')} className={`px-3 py-1.5 rounded-md ${mode === 'byStudent' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>학생별 전체보기</button>
+                            </div>
                         </div>
                     </div>
                     {mode === 'byRound' ? <ByRoundRecord data={data} updateData={updateData} /> : <ByStudentRecord data={data} updateData={updateData} />}
@@ -1660,7 +1736,6 @@
 
             const TABS = [
                 { id: 'roster', label: '명단관리', icon: '👥' },
-                { id: 'assign', label: '모둠배정', icon: '🎲' },
                 { id: 'record', label: '활동기록', icon: '📝' },
                 { id: 'settings', label: '설정', icon: '⚙️' },
             ];
@@ -1692,7 +1767,6 @@
 
                         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 sm:p-6">
                             {activeTab === 'roster' && <RosterTab data={data} updateData={updateData} google={{ ...google, clientId: googleClientId }} bulkCreateClasses={bulkCreateClasses} />}
-                            {activeTab === 'assign' && <AssignTab data={data} updateData={updateData} />}
                             {activeTab === 'record' && <RecordTab data={data} updateData={updateData} />}
                             {activeTab === 'settings' && (
                                 <SettingsTab
