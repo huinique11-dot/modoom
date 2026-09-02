@@ -777,15 +777,15 @@
 
             return (
                 <div>
-                    <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
                         <h3 className="text-lg font-bold text-slate-900">학생 명단 ({students.length}명)</h3>
-                        <div className="flex flex-wrap items-center gap-2">
-                            <button onClick={() => setManageGroups(true)} className="text-xs bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded font-bold border border-indigo-100 hover:bg-indigo-100">🎲 모둠 관리</button>
-                            <button onClick={() => setShowPaste(!showPaste)} className="text-xs bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded font-bold border border-indigo-100 hover:bg-indigo-100">
-                                {showPaste ? '닫기' : '📋 여러 명 붙여넣기'}
+                        <div className="flex items-center gap-1.5 sm:gap-2">
+                            <button onClick={() => setManageGroups(true)} className="text-xs bg-indigo-50 text-indigo-700 px-2.5 sm:px-3 py-1.5 rounded font-bold border border-indigo-100 hover:bg-indigo-100 whitespace-nowrap">🎲 모둠 관리</button>
+                            <button onClick={() => setShowPaste(!showPaste)} className="text-xs bg-indigo-50 text-indigo-700 px-2.5 sm:px-3 py-1.5 rounded font-bold border border-indigo-100 hover:bg-indigo-100 whitespace-nowrap">
+                                {showPaste ? '닫기' : '📋 붙여넣기'}
                             </button>
-                            <button onClick={() => setShowAddForm(!showAddForm)} className="text-xs bg-slate-100 text-slate-600 px-3 py-1.5 rounded font-bold hover:bg-slate-200">
-                                {showAddForm ? '닫기' : '＋ 번호·성별 등 자세히 추가'}
+                            <button onClick={() => setShowAddForm(!showAddForm)} className="text-xs bg-slate-100 text-slate-600 px-2.5 sm:px-3 py-1.5 rounded font-bold hover:bg-slate-200 whitespace-nowrap">
+                                {showAddForm ? '닫기' : '＋ 자세히 추가'}
                             </button>
                         </div>
                     </div>
@@ -1498,16 +1498,30 @@
                     <button onClick={copyAllText} className="w-full text-xs bg-indigo-50 text-indigo-700 px-3 py-2 rounded-lg font-bold border border-indigo-100 hover:bg-indigo-100 mb-1">📋 전체 학생 기록 한 번에 복사</button>
                     {bulkCopyMsg && <p className="text-xs text-emerald-600 mb-3">{bulkCopyMsg}</p>}
                     <div className="border border-slate-200 rounded-xl bg-white overflow-hidden">
-                        {filteredStudents.map(s => (
-                            <div key={s.id} className="border-b border-slate-50 last:border-b-0">
-                                <button onClick={() => setExpandedId(expandedId === s.id ? null : s.id)}
-                                    className={`w-full text-left px-3 py-2.5 text-sm hover:bg-slate-50 flex items-center justify-between ${expandedId === s.id ? 'bg-indigo-50 text-indigo-700 font-bold' : ''}`}>
-                                    <span>{s.number ? `${s.number}번 ` : ''}{s.name}</span>
-                                    <span className="text-slate-300 text-xs">{expandedId === s.id ? '▲' : '▼'}</span>
-                                </button>
-                                {expandedId === s.id && <StudentRecordPanel student={s} data={data} updateData={updateData} />}
-                            </div>
-                        ))}
+                        {filteredStudents.map(s => {
+                            const ratingDots = data.individualRecords
+                                .filter(r => r.studentId === s.id && r.rating)
+                                .sort((a, b) => a.createdAt - b.createdAt)
+                                .map(r => r.rating)
+                                .slice(-10);
+                            return (
+                                <div key={s.id} className="border-b border-slate-50 last:border-b-0">
+                                    <button onClick={() => setExpandedId(expandedId === s.id ? null : s.id)}
+                                        className={`w-full text-left px-3 py-2.5 text-sm hover:bg-slate-50 flex items-center justify-between gap-2 ${expandedId === s.id ? 'bg-indigo-50 text-indigo-700 font-bold' : ''}`}>
+                                        <span className="flex items-center gap-2 min-w-0">
+                                            <span className="truncate">{s.number ? `${s.number} ` : ''}{s.name}</span>
+                                            {ratingDots.length > 0 && (
+                                                <span className="flex items-center gap-[2px] shrink-0">
+                                                    {ratingDots.map((r, i) => <RatingDot key={i} rating={r} />)}
+                                                </span>
+                                            )}
+                                        </span>
+                                        <span className="text-slate-300 text-xs shrink-0">{expandedId === s.id ? '▲' : '▼'}</span>
+                                    </button>
+                                    {expandedId === s.id && <StudentRecordPanel student={s} data={data} updateData={updateData} />}
+                                </div>
+                            );
+                        })}
                         {filteredStudents.length === 0 && <p className="text-xs text-slate-400 p-3">학생이 없습니다.</p>}
                     </div>
                 </div>
