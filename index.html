@@ -1186,8 +1186,10 @@
             const round = data.rounds && data.rounds[0];
             const canvasRef = useRef(null);
             const dragRef = useRef(null);
+            const groupDragRef = useRef(null);
             const [positions, setPositions] = useState({});
             const [draggingId, setDraggingId] = useState(null);
+            const [draggingGroupIdx, setDraggingGroupIdx] = useState(null);
             const [canvasSize, setCanvasSize] = useState({ width: 1000, height: 560 });
 
             const savedLayout = (round && data.classroomLayout && data.classroomLayout[round.id]) || {};
@@ -1244,17 +1246,85 @@
                 return { x: clampPct(center.x + dx, 6, 94), y: clampPct(center.y + dy, 18, 92) };
             };
 
-            // flatten groups → individual draggable tokens
+            const getPos = (studentId, fallback) => positions[studentId] || savedLayout[studentId] || fallback;
+
+            // flatten groups → individual draggable tokens, and keep a per-student
+            // position lookup + per-group member position list (needed for the
+            // "grab the whole cluster" handle below)
             const tokens = [];
+            const posById = {};
+            const groupMemberPos = groups.map(() => []);
             groups.forEach((g, gi) => {
                 g.memberIds.forEach((id, mi) => {
                     const student = data.students.find(s => s.id === id);
                     if (!student) return;
-                    tokens.push({ student, groupIdx: gi, defaultPos: defaultStudentPos(gi, mi, g.memberIds.length) });
+                    const pos = getPos(id, defaultStudentPos(gi, mi, g.memberIds.length));
+                    posById[id] = pos;
+                    groupMemberPos[gi].push(pos);
+                    tokens.push({ student, groupIdx: gi, pos });
                 });
             });
 
-            const getPos = (studentId, fallback) => positions[studentId] || savedLayout[studentId] || fallback;
+            const groupHandles = groups.map((g, gi) => {
+                const memberPos = groupMemberPos[gi];
+                if (!memberPos.length) return null;
+                const cx = memberPos.reduce((s, p) => s + p.x, 0) / memberPos.length;
+                const minY = Math.min(...memberPos.map(p => p.y));
+                return { x: clampPct(cx, 4, 96), y: Math.max(4, minY - 7) };
+            });
+
+            const onGroupPointerDown = (e, groupIdx) => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                const canvasRect = canvas.getBoundingClientRect();
+                const memberStart = {};
+                groups[groupIdx].memberIds.forEach(id => {
+                    if (posById[id]) memberStart[id] = posById[id];
+                });
+                groupDragRef.current = {
+                    groupIdx,
+                    canvasRect,
+                    startClientX: e.clientX,
+                    startClientY: e.clientY,
+                    memberStart,
+                    lastDelta: { x: 0, y: 0 },
+                };
+                setDraggingGroupIdx(groupIdx);
+                e.currentTarget.setPointerCapture(e.pointerId);
+            };
+
+            const onGroupPointerMove = (e) => {
+                const d = groupDragRef.current;
+                if (!d) return;
+                const dxPct = ((e.clientX - d.startClientX) / d.canvasRect.width) * 100;
+                const dyPct = ((e.clientY - d.startClientY) / d.canvasRect.height) * 100;
+                d.lastDelta = { x: dxPct, y: dyPct };
+                setPositions(prev => {
+                    const next = { ...prev };
+                    Object.entries(d.memberStart).forEach(([id, start]) => {
+                        next[id] = { x: clampPct(start.x + dxPct, 3, 97), y: clampPct(start.y + dyPct, 16, 96) };
+                    });
+                    return next;
+                });
+            };
+
+            const onGroupPointerUp = () => {
+                const d = groupDragRef.current;
+                if (!d) return;
+                groupDragRef.current = null;
+                setDraggingGroupIdx(null);
+                const updates = {};
+                Object.entries(d.memberStart).forEach(([id, start]) => {
+                    updates[id] = { x: clampPct(start.x + d.lastDelta.x, 3, 97), y: clampPct(start.y + d.lastDelta.y, 16, 96) };
+                });
+                updateData(dprev => ({
+                    ...dprev,
+                    classroomLayout: {
+                        ...(dprev.classroomLayout || {}),
+                        [round.id]: { ...((dprev.classroomLayout || {})[round.id]), ...updates },
+                    },
+                }));
+            };
 
             const onPointerDown = (e, studentId) => {
                 const canvas = canvasRef.current;
@@ -1318,7 +1388,7 @@
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                         <div>
                             <h3 className="text-lg font-bold text-slate-900">교실</h3>
-                            <p className="text-xs text-slate-400">{round.name} 기준 · 이름표를 손가락(마우스)으로 하나씩 끌어서 실제 자리 모양대로 배치하세요.</p>
+                            <p className="text-xs text-slate-400">{round.name} 기준 · ✋ 손잡이를 끌면 모둠 전체가 함께 움직이고, 이름표 하나씩 끌면 그 학생만 움직여요. 찰흙 만지듯 자유롭게 모양을 잡아보세요.</p>
                         </div>
                         <button onClick={resetLayout} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 font-bold shrink-0">↺ 기본 배치로</button>
                     </div>
@@ -1343,10 +1413,28 @@
                             <div className="w-[65%] h-1.5 rounded-b-sm" style={{ background: '#c9a876' }}></div>
                         </div>
 
+                        {/* group "grab whole cluster" handles — drag to move every member together */}
+                        {groupHandles.map((h, gi) => {
+                            if (!h) return null;
+                            const pal = paletteFor(gi);
+                            const dragging = draggingGroupIdx === gi;
+                            return (
+                                <div key={groups[gi].id}
+                                    onPointerDown={(e) => onGroupPointerDown(e, gi)}
+                                    onPointerMove={onGroupPointerMove}
+                                    onPointerUp={onGroupPointerUp}
+                                    onPointerCancel={onGroupPointerUp}
+                                    title={`${groups[gi].name} 전체 이동`}
+                                    className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing rounded-full border-2 flex items-center justify-center shadow-sm ${pal.bg} ${pal.border} ${dragging ? 'shadow-lg scale-125 z-30' : 'z-10 opacity-80 hover:opacity-100'}`}
+                                    style={{ left: `${h.x}%`, top: `${h.y}%`, width: '26px', height: '26px', touchAction: 'none', transition: dragging ? 'none' : 'box-shadow .15s, transform .15s' }}>
+                                    <span className="text-xs leading-none">✋</span>
+                                </div>
+                            );
+                        })}
+
                         {/* individually draggable student tokens, color-coded by group */}
-                        {tokens.map(({ student, groupIdx, defaultPos }) => {
+                        {tokens.map(({ student, groupIdx, pos }) => {
                             const pal = paletteFor(groupIdx);
-                            const pos = getPos(student.id, defaultPos);
                             const dragging = draggingId === student.id;
                             return (
                                 <div key={student.id}
