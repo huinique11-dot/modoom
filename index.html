@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>모둠 배정 &amp; 생기부 기록 관리</title>
+    <title>모둠 활동 도우미</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
@@ -24,8 +24,7 @@
         // ---------------------------------------------------------------
         // Constants & small utilities
         // ---------------------------------------------------------------
-        const DEFAULT_DATA = { students: [], rounds: [], groupRecords: [], individualRecords: [] };
-        const RECORD_CATEGORIES = ['자율활동', '동아리활동', '진로활동', '봉사활동', '행동특성 및 종합의견', '교과학습발달상황', '기타'];
+        const DEFAULT_DATA = { students: [], rounds: [], groupRecords: [], individualRecords: [], sessionNotes: [], categories: [] };
 
         const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
         const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -133,10 +132,17 @@
         const paletteFor = (idx) => GROUP_PALETTE[idx % GROUP_PALETTE.length];
 
         const RATING_META = {
-            good: { emoji: '🙂', label: '잘함', cls: 'bg-emerald-600 text-white border-emerald-600', idleCls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-            mid: { emoji: '😐', label: '보통', cls: 'bg-amber-500 text-white border-amber-500', idleCls: 'bg-amber-50 text-amber-700 border-amber-200' },
-            low: { emoji: '🙁', label: '노력요함', cls: 'bg-rose-500 text-white border-rose-500', idleCls: 'bg-rose-50 text-rose-700 border-rose-200' },
+            good: { label: '잘함', dot: 'bg-emerald-500', cls: 'bg-emerald-500 text-white border-emerald-500', idleCls: 'bg-white text-emerald-700 border-emerald-500' },
+            mid: { label: '보통', dot: 'bg-amber-400', cls: 'bg-amber-400 text-white border-amber-400', idleCls: 'bg-white text-amber-700 border-amber-400' },
+            low: { label: '노력요함', dot: 'bg-rose-500', cls: 'bg-rose-500 text-white border-rose-500', idleCls: 'bg-white text-rose-700 border-rose-500' },
         };
+        const RATING_ORDER = ['good', 'mid', 'low'];
+
+        function RatingDot({ rating, size = 'sm' }) {
+            if (!rating) return null;
+            const cls = size === 'sm' ? 'w-3 h-3' : 'w-4 h-4';
+            return <span className={`inline-block rounded-full ${cls} ${RATING_META[rating].dot}`} title={RATING_META[rating].label}></span>;
+        }
 
         const KEYWORD_GROUPS = [
             { category: '음악 활동', tags: ['실기·표현', '작품 제작', '감상·비평', '창작 의도', '기법 활용', '공연·전시', '연습 태도', '재료·매체 탐색', '아이디어 발전', '협업 무대'] },
@@ -148,13 +154,46 @@
         function RatingButtons({ value, onChange }) {
             return (
                 <div className="flex gap-2">
-                    {Object.entries(RATING_META).map(([v, m]) => (
-                        <button key={v} type="button" onClick={() => onChange(value === v ? null : v)}
-                            className={`flex-1 py-2.5 rounded-xl border-2 text-sm font-bold ${value === v ? m.cls : m.idleCls}`}>
-                            {m.emoji} {m.label}
-                        </button>
-                    ))}
+                    {RATING_ORDER.map(v => {
+                        const m = RATING_META[v];
+                        return (
+                            <button key={v} type="button" onClick={() => onChange(value === v ? null : v)}
+                                className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border-2 text-sm font-bold ${value === v ? m.cls : m.idleCls}`}>
+                                <span className={`w-2.5 h-2.5 rounded-full ${value === v ? 'bg-white' : m.dot}`}></span>
+                                {m.label}
+                            </button>
+                        );
+                    })}
                 </div>
+            );
+        }
+
+        function CategorySelect({ categories, value, onChange, onAddCategory }) {
+            const [adding, setAdding] = useState(false);
+            const [newCat, setNewCat] = useState('');
+            const commit = () => {
+                const name = newCat.trim();
+                if (name) { onAddCategory(name); onChange(name); }
+                setAdding(false);
+                setNewCat('');
+            };
+            if (adding) {
+                return (
+                    <div className="flex gap-1">
+                        <input autoFocus value={newCat} onChange={e => setNewCat(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }}
+                            placeholder="새 구분명 입력" className="border rounded-lg px-2 py-1.5 text-xs w-28" />
+                        <button type="button" onClick={commit} className="text-xs bg-indigo-600 text-white px-2 rounded-lg font-bold">추가</button>
+                        <button type="button" onClick={() => { setAdding(false); setNewCat(''); }} className="text-xs px-2 text-slate-400">취소</button>
+                    </div>
+                );
+            }
+            return (
+                <select value={value} onChange={e => e.target.value === '__add__' ? setAdding(true) : onChange(e.target.value)} className="border rounded-lg px-2 py-1.5 text-xs">
+                    <option value="">구분 없음</option>
+                    {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                    <option value="__add__">+ 새 구분 추가</option>
+                </select>
             );
         }
 
@@ -310,7 +349,12 @@
                 const round = roundById[rec.roundId];
                 indivRows.push([studentLabel(data.students, rec.studentId), rec.category || '', rec.date, rec.rating ? RATING_META[rec.rating].label : '', (rec.tags || []).join(', '), round ? round.name : '', rec.content]);
             });
-            return { '명단': rosterRows, '모둠배정': assignRows, '모둠기록': groupRows, '개인기록': indivRows };
+            const sessionRows = [['회차', '날짜', '수업 활동 내용']];
+            (data.sessionNotes || []).forEach(n => {
+                const round = roundById[n.roundId];
+                sessionRows.push([round ? round.name : '(삭제된 회차)', n.date, n.content]);
+            });
+            return { '명단': rosterRows, '모둠배정': assignRows, '모둠기록': groupRows, '개인기록': indivRows, '수업활동': sessionRows };
         }
 
         async function sheetsFetch(token, url, options = {}) {
@@ -782,8 +826,10 @@
         // Record tab — one screen: whole-group logging + tap a student for
         // their individual record, plus a student-first history view.
         // ---------------------------------------------------------------
-        function IndivPanel({ student, data, isLeader, onToggleLeader, onQuickRate, form, setForm, onToggleTag, onAdd, onDelete }) {
+        function IndivPanel({ student, data, categories, onAddCategory, isLeader, onToggleLeader, onQuickRate, form, setForm, onToggleTag, onAdd, onDelete }) {
             const records = data.individualRecords.filter(r => r.studentId === student.id).sort((a, b) => b.createdAt - a.createdAt);
+            const quickRatings = records.filter(r => r.rating && !r.content && (r.tags || []).length === 0);
+            const detailed = records.filter(r => !(r.rating && !r.content && (r.tags || []).length === 0));
             return (
                 <div className="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
                     <div className="flex items-center justify-between mb-3">
@@ -796,12 +842,21 @@
                     <p className="text-xs font-bold text-slate-500 mb-1.5">오늘 활동 평가 (탭하면 바로 저장돼요)</p>
                     <RatingButtons value={null} onChange={onQuickRate} />
 
+                    {quickRatings.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                            {quickRatings.map(r => (
+                                <span key={r.id} className="group inline-flex items-center gap-1 pl-1.5 pr-1 py-1 rounded-full bg-white border border-slate-200 text-[10px] font-bold text-slate-500">
+                                    <RatingDot rating={r.rating} />{r.date.slice(5)}
+                                    <button onClick={() => onDelete(r.id)} className="ml-0.5 text-slate-300 hover:text-rose-500">×</button>
+                                </span>
+                            ))}
+                        </div>
+                    )}
+
                     <details className="mt-3">
                         <summary className="text-xs font-bold text-indigo-600 cursor-pointer select-none">키워드·메모로 자세히 기록하기</summary>
                         <div className="mt-2 space-y-2">
-                            <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} className="border rounded-lg px-2 py-1.5 text-xs">
-                                {RECORD_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                            </select>
+                            <CategorySelect categories={categories} value={form.category} onChange={c => setForm({ ...form, category: c })} onAddCategory={onAddCategory} />
                             <TagPicker selected={form.tags} onToggle={onToggleTag} />
                             {form.tags.length > 0 && (
                                 <div className="flex flex-wrap gap-1">
@@ -813,14 +868,14 @@
                         </div>
                     </details>
 
-                    {records.length > 0 && (
+                    {detailed.length > 0 && (
                         <div className="mt-3 space-y-1.5">
-                            {records.slice(0, 6).map(r => (
+                            {detailed.slice(0, 6).map(r => (
                                 <div key={r.id} className="flex justify-between items-start bg-white rounded-lg p-2 border border-slate-100 text-xs">
                                     <div>
                                         <span className="text-slate-400 font-bold mr-1">{r.date}</span>
-                                        {r.rating && <span className="mr-1">{RATING_META[r.rating].emoji}</span>}
-                                        {(r.tags || []).map(t => <span key={t} className="inline-block bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded-full mr-1">{t}</span>)}
+                                        <RatingDot rating={r.rating} />
+                                        {(r.tags || []).map(t => <span key={t} className="inline-block bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded-full mr-1 ml-1">{t}</span>)}
                                         {r.content && <span className="text-slate-700">{r.content}</span>}
                                     </div>
                                     <button onClick={() => onDelete(r.id)} className="text-rose-500 hover:underline ml-2 shrink-0">삭제</button>
@@ -840,7 +895,8 @@
             const [date, setDate] = useState(todayStr());
             const [groupForm, setGroupForm] = useState({});
             const [selectedMemberId, setSelectedMemberId] = useState(null);
-            const [indivForm, setIndivForm] = useState({ category: RECORD_CATEGORIES[0], tags: [], content: '' });
+            const [indivForm, setIndivForm] = useState({ category: '', tags: [], content: '' });
+            const [sessionNoteText, setSessionNoteText] = useState('');
 
             useEffect(() => { setSelectedMemberId(null); }, [roundId]);
 
@@ -861,20 +917,51 @@
             const addIndivRecord = (studentId) => {
                 if (!indivForm.content.trim() && indivForm.tags.length === 0) return;
                 updateData(prev => ({ ...prev, individualRecords: [{ id: uid(), studentId, roundId, date, category: indivForm.category, tags: indivForm.tags, rating: null, content: indivForm.content.trim(), createdAt: Date.now() }, ...prev.individualRecords] }));
-                setIndivForm({ category: RECORD_CATEGORIES[0], tags: [], content: '' });
+                setIndivForm({ category: '', tags: [], content: '' });
             };
             const toggleTag = (tag) => setIndivForm(f => ({ ...f, tags: f.tags.includes(tag) ? f.tags.filter(t => t !== tag) : [...f.tags, tag] }));
             const deleteIndivRecord = (id) => updateData(prev => ({ ...prev, individualRecords: prev.individualRecords.filter(r => r.id !== id) }));
             const setLeader = (groupId, studentId) => updateData(prev => ({ ...prev, rounds: prev.rounds.map(r => r.id === roundId ? { ...r, groups: r.groups.map(g => g.id === groupId ? { ...g, leaderId: g.leaderId === studentId ? null : studentId } : g) } : r) }));
+            const addCategory = (name) => updateData(prev => ({ ...prev, categories: prev.categories.includes(name) ? prev.categories : [...prev.categories, name] }));
+
+            const sessionNotes = data.sessionNotes.filter(n => n.roundId === roundId).sort((a, b) => b.createdAt - a.createdAt);
+            const addSessionNote = () => {
+                if (!sessionNoteText.trim()) return;
+                updateData(prev => ({ ...prev, sessionNotes: [{ id: uid(), roundId, date, content: sessionNoteText.trim(), createdAt: Date.now() }, ...prev.sessionNotes] }));
+                setSessionNoteText('');
+            };
+            const deleteSessionNote = (id) => updateData(prev => ({ ...prev, sessionNotes: prev.sessionNotes.filter(n => n.id !== id) }));
 
             return (
                 <div>
-                    <div className="flex flex-wrap gap-2 mb-5">
+                    <div className="flex flex-wrap gap-2 mb-4">
                         <select value={roundId} onChange={e => setRoundId(e.target.value)} className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[160px]">
                             {rounds.map(r => <option key={r.id} value={r.id}>{r.name} ({r.date})</option>)}
                         </select>
                         <input type="date" value={date} onChange={e => setDate(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" />
                     </div>
+
+                    {round && (
+                        <div className="mb-5 p-4 bg-indigo-50 border border-indigo-100 rounded-2xl">
+                            <p className="text-xs font-bold text-indigo-700 mb-2">오늘 수업에서 한 활동 (반 전체)</p>
+                            <div className="flex gap-2">
+                                <input value={sessionNoteText} onChange={e => setSessionNoteText(e.target.value)}
+                                    onKeyDown={e => { if (e.key === 'Enter') addSessionNote(); }}
+                                    placeholder="예: 3개의 프렛 안에서 도~도 옥타브 연주 연습" className="flex-1 border rounded-lg px-3 py-2 text-sm" />
+                                <button onClick={addSessionNote} className="bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-indigo-700 shrink-0">저장</button>
+                            </div>
+                            {sessionNotes.length > 0 && (
+                                <div className="mt-2 space-y-1">
+                                    {sessionNotes.map(n => (
+                                        <div key={n.id} className="flex justify-between items-start bg-white rounded-lg p-2 border border-indigo-100 text-xs">
+                                            <div><span className="text-slate-400 font-bold mr-1">{n.date}</span><span className="text-slate-700">{n.content}</span></div>
+                                            <button onClick={() => deleteSessionNote(n.id)} className="text-rose-500 hover:underline ml-2 shrink-0">삭제</button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     {round && (
                         <div className="space-y-4">
@@ -915,7 +1002,7 @@
                                             )}
 
                                             {members.filter(m => m.id === selectedMemberId).map(m => (
-                                                <IndivPanel key={m.id} student={m} data={data}
+                                                <IndivPanel key={m.id} student={m} data={data} categories={data.categories} onAddCategory={addCategory}
                                                     isLeader={g.leaderId === m.id} onToggleLeader={() => setLeader(g.id, m.id)}
                                                     onQuickRate={(rating) => quickRate(m.id, rating)}
                                                     form={indivForm} setForm={setIndivForm} onToggleTag={toggleTag}
@@ -935,11 +1022,13 @@
             const students = useMemo(() => [...data.students].sort(byNumberThenName), [data.students]);
             const [studentId, setStudentId] = useState(students[0]?.id || '');
             useEffect(() => { if (!students.find(s => s.id === studentId)) setStudentId(students[0]?.id || ''); }, [students]);
-            const [form, setForm] = useState({ category: RECORD_CATEGORIES[0], date: todayStr(), roundId: '', rating: null, tags: [], content: '' });
+            const [form, setForm] = useState({ category: '', date: todayStr(), roundId: '', rating: null, tags: [], content: '' });
             const [search, setSearch] = useState('');
 
             const filteredStudents = students.filter(s => s.name.includes(search) || String(s.number).includes(search));
             const records = data.individualRecords.filter(r => r.studentId === studentId).sort((a, b) => b.createdAt - a.createdAt);
+            const quickRatings = records.filter(r => r.rating && !r.content && (r.tags || []).length === 0);
+            const detailed = records.filter(r => !(r.rating && !r.content && (r.tags || []).length === 0));
 
             const addRecord = () => {
                 if (!studentId || (!form.content.trim() && form.tags.length === 0 && !form.rating)) return;
@@ -948,11 +1037,12 @@
             };
             const toggleTag = (tag) => setForm(f => ({ ...f, tags: f.tags.includes(tag) ? f.tags.filter(t => t !== tag) : [...f.tags, tag] }));
             const deleteRecord = (id) => updateData(prev => ({ ...prev, individualRecords: prev.individualRecords.filter(r => r.id !== id) }));
+            const addCategory = (name) => updateData(prev => ({ ...prev, categories: prev.categories.includes(name) ? prev.categories : [...prev.categories, name] }));
 
             const exportText = () => {
                 const s = students.find(s => s.id === studentId);
                 if (!s) return;
-                const lines = records.map(r => `[${r.date}] (${r.category}${r.rating ? ' · ' + RATING_META[r.rating].label : ''}) ${[...(r.tags || []), r.content].filter(Boolean).join(' ')}`).join('\n');
+                const lines = records.map(r => `[${r.date}] (${r.category || '구분없음'}${r.rating ? ' · ' + RATING_META[r.rating].label : ''}) ${[...(r.tags || []), r.content].filter(Boolean).join(' ')}`).join('\n');
                 downloadFile(`${s.name}_생기부기록.txt`, `${s.name} (${s.number}번) 기록\n\n${lines}`, 'text/plain');
             };
 
@@ -980,9 +1070,7 @@
                                 </div>
                                 <div className="p-4 bg-white border border-slate-200 rounded-xl mb-4 space-y-2">
                                     <div className="flex flex-wrap gap-2">
-                                        <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} className="border rounded-lg px-2 py-1.5 text-xs">
-                                            {RECORD_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                                        </select>
+                                        <CategorySelect categories={data.categories} value={form.category} onChange={c => setForm({ ...form, category: c })} onAddCategory={addCategory} />
                                         <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className="border rounded-lg px-2 py-1.5 text-xs" />
                                         <select value={form.roundId} onChange={e => setForm({ ...form, roundId: e.target.value })} className="border rounded-lg px-2 py-1.5 text-xs">
                                             <option value="">관련 회차 없음</option>
@@ -1001,13 +1089,25 @@
                                         <button onClick={addRecord} className="bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-indigo-700">기록 추가</button>
                                     </div>
                                 </div>
+
+                                {quickRatings.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 mb-3">
+                                        {quickRatings.map(r => (
+                                            <span key={r.id} className="group inline-flex items-center gap-1 pl-1.5 pr-1 py-1 rounded-full bg-white border border-slate-200 text-[10px] font-bold text-slate-500">
+                                                <RatingDot rating={r.rating} />{r.date.slice(5)}
+                                                <button onClick={() => deleteRecord(r.id)} className="ml-0.5 text-slate-300 hover:text-rose-500">×</button>
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
+
                                 <div className="space-y-2">
-                                    {records.map(r => (
+                                    {detailed.map(r => (
                                         <div key={r.id} className="flex justify-between items-start bg-white border border-slate-100 rounded-lg p-3">
                                             <div>
                                                 {r.category && <span className="text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-bold mr-1">{r.category}</span>}
                                                 <span className="text-[10px] text-slate-400 font-bold">{r.date}</span>
-                                                {r.rating && <span className="ml-1">{RATING_META[r.rating].emoji} {RATING_META[r.rating].label}</span>}
+                                                {r.rating && <span className="ml-1 inline-flex items-center gap-1"><RatingDot rating={r.rating} />{RATING_META[r.rating].label}</span>}
                                                 <div className="mt-1">
                                                     {(r.tags || []).map(t => <span key={t} className="inline-block text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded-full mr-1 mb-1">{t}</span>)}
                                                 </div>
@@ -1059,6 +1159,8 @@
                 finally { setExportBusy(false); }
             };
 
+            const removeCategory = (name) => updateData(prev => ({ ...prev, categories: prev.categories.filter(c => c !== name) }));
+
             const backupJson = () => downloadFile(`모둠생기부_백업_${todayStr()}.json`, JSON.stringify(data, null, 2));
             const restoreJson = (e) => {
                 const file = e.target.files[0];
@@ -1099,6 +1201,20 @@
                     </section>
 
                     <section>
+                        <h3 className="text-lg font-bold text-slate-900 mb-2">🏷️ 기록 구분 관리</h3>
+                        <p className="text-xs text-slate-500 mb-3">개인 기록을 남길 때 고를 수 있는 "구분"(예: 수행평가, 태도 등) 목록입니다. 기록 화면에서 "+ 새 구분 추가"로 언제든 추가할 수 있고, 여기서 지울 수 있어요.</p>
+                        <div className="flex flex-wrap gap-1.5">
+                            {data.categories.map(c => (
+                                <span key={c} className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-700 px-2.5 py-1.5 rounded-full font-medium">
+                                    {c}
+                                    <button onClick={() => removeCategory(c)} className="text-slate-400 hover:text-rose-500 font-bold">×</button>
+                                </span>
+                            ))}
+                            {data.categories.length === 0 && <span className="text-xs text-slate-400">아직 추가한 구분이 없습니다.</span>}
+                        </div>
+                    </section>
+
+                    <section>
                         <h3 className="text-lg font-bold text-slate-900 mb-2">💾 백업 파일</h3>
                         <p className="text-xs text-slate-500 mb-3">Firebase나 구글 계정 없이도 전체 데이터를 파일로 저장하고 불러올 수 있습니다.</p>
                         <div className="flex items-center gap-2">
@@ -1114,9 +1230,61 @@
         // ---------------------------------------------------------------
         // App shell
         // ---------------------------------------------------------------
+        function ClassSwitcher({ classCode, classCodes, onSwitch, onCreate, onRemove }) {
+            const [open, setOpen] = useState(false);
+            const [newCode, setNewCode] = useState('');
+            const create = () => {
+                const code = newCode.trim();
+                if (!code) return;
+                onCreate(code);
+                setNewCode('');
+                setOpen(false);
+            };
+            return (
+                <div className="relative">
+                    <button onClick={() => setOpen(!open)} className="flex items-center gap-1 bg-indigo-50 text-indigo-700 text-xs px-2.5 py-1.5 rounded-full font-semibold border border-indigo-100">
+                        {classCode} <span className={`inline-block transition-transform ${open ? 'rotate-180' : ''}`}>⌄</span>
+                    </button>
+                    {open && (
+                        <React.Fragment>
+                            <div className="fixed inset-0 z-40" onClick={() => setOpen(false)}></div>
+                            <div className="absolute left-0 top-full mt-1 w-52 bg-white border border-slate-200 rounded-xl shadow-lg z-50 overflow-hidden">
+                                <p className="text-[10px] font-bold text-slate-400 px-3 pt-2 pb-1">학급 선택</p>
+                                <div className="max-h-56 overflow-y-auto">
+                                    {classCodes.map(code => (
+                                        <div key={code} className={`flex items-center justify-between hover:bg-slate-50 ${code === classCode ? 'bg-indigo-50' : ''}`}>
+                                            <button onClick={() => { onSwitch(code); setOpen(false); }}
+                                                className={`flex-1 text-left px-3 py-2 text-sm ${code === classCode ? 'text-indigo-700 font-bold' : 'text-slate-700'}`}>
+                                                {code}
+                                            </button>
+                                            {code !== classCode && (
+                                                <button onClick={(e) => { e.stopPropagation(); onRemove(code); }} className="px-2 text-slate-300 hover:text-rose-500 text-xs">×</button>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="border-t border-slate-100 p-2 flex gap-1">
+                                    <input value={newCode} onChange={e => setNewCode(e.target.value)}
+                                        onKeyDown={e => { if (e.key === 'Enter') create(); }}
+                                        placeholder="새 학급 코드" className="flex-1 border rounded-lg px-2 py-1.5 text-xs outline-none focus:border-indigo-500" />
+                                    <button onClick={create} className="text-xs bg-indigo-600 text-white px-2.5 rounded-lg font-bold">추가</button>
+                                </div>
+                            </div>
+                        </React.Fragment>
+                    )}
+                </div>
+            );
+        }
+
         function App() {
             const [classCode, setClassCode] = useState(localStorage.getItem('sga_classCode') || 'default');
-            const [inputCode, setInputCode] = useState('');
+            const [classCodes, setClassCodes] = useState(() => {
+                try {
+                    const saved = JSON.parse(localStorage.getItem('sga_classCodes') || '[]');
+                    const current = localStorage.getItem('sga_classCode') || 'default';
+                    return saved.includes(current) ? saved : [...saved, current];
+                } catch (e) { return ['default']; }
+            });
             const [firebaseConfigText, setFirebaseConfigText] = useState(localStorage.getItem('sga_firebaseConfig') || '');
             const [firebaseConfig, setFirebaseConfig] = useState(() => {
                 try { return JSON.parse(localStorage.getItem('sga_firebaseConfig') || 'null'); } catch (e) { return null; }
@@ -1184,14 +1352,35 @@
                 });
             };
 
-            const connectClass = (e) => {
-                e.preventDefault();
-                if (!inputCode.trim()) return;
-                const code = inputCode.trim();
+            const switchClass = (code) => {
                 setClassCode(code);
                 localStorage.setItem('sga_classCode', code);
-                setInputCode('');
             };
+            const createClass = (code) => {
+                setClassCodes(prev => {
+                    if (prev.includes(code)) return prev;
+                    const next = [...prev, code];
+                    localStorage.setItem('sga_classCodes', JSON.stringify(next));
+                    return next;
+                });
+                switchClass(code);
+            };
+            const removeClassCode = (code) => {
+                setClassCodes(prev => {
+                    const next = prev.filter(c => c !== code);
+                    localStorage.setItem('sga_classCodes', JSON.stringify(next));
+                    return next;
+                });
+            };
+
+            useEffect(() => {
+                setClassCodes(prev => {
+                    if (prev.includes(classCode)) return prev;
+                    const next = [...prev, classCode];
+                    localStorage.setItem('sga_classCodes', JSON.stringify(next));
+                    return next;
+                });
+            }, [classCode]);
 
             const TABS = [
                 { id: 'roster', label: '명단관리', icon: '👥' },
@@ -1206,14 +1395,10 @@
                         <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
                             <div className="flex items-center gap-3">
                                 <span className="text-2xl">🧩</span>
-                                <h1 className="text-lg sm:text-xl font-bold text-indigo-600">모둠 배정 &amp; 생기부 기록</h1>
-                                <span className="bg-indigo-50 text-indigo-700 text-xs px-2.5 py-1 rounded-full font-semibold border border-indigo-100">{classCode}</span>
+                                <h1 className="text-lg sm:text-xl font-bold text-indigo-600">모둠 활동 도우미</h1>
                                 <span className={`text-xs font-bold ${connected ? 'text-emerald-600' : 'text-slate-400'}`}>{connected ? '● 동기화됨' : '○ 이 기기에만 저장'}</span>
                             </div>
-                            <form onSubmit={connectClass} className="flex items-center bg-slate-100 rounded-lg p-1 border border-slate-200">
-                                <input type="text" placeholder="학급 코드 입력 (예: 6-3)" value={inputCode} onChange={e => setInputCode(e.target.value)} className="bg-transparent text-xs px-2 py-1 outline-none w-32 focus:w-40 transition-all" />
-                                <button type="submit" className="bg-slate-700 text-white text-xs px-2.5 py-1 rounded-md hover:bg-slate-800">이동</button>
-                            </form>
+                            <ClassSwitcher classCode={classCode} classCodes={classCodes} onSwitch={switchClass} onCreate={createClass} onRemove={removeClassCode} />
                         </div>
                     </header>
 
