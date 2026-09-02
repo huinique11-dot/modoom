@@ -54,6 +54,93 @@
             if (!isNaN(an) && !isNaN(bn) && an !== bn) return an - bn;
             return a.name.localeCompare(b.name, 'ko');
         };
+
+        // ---------------------------------------------------------------
+        // Conditional group auto-assignment: fills only the currently
+        // unassigned students into the existing groups (so manually
+        // pre-placed students — leaders, students who need separating —
+        // stay put), choosing each student's group by a per-condition
+        // scoring function that always picks the group where they fit best.
+        // ---------------------------------------------------------------
+        const ASSIGN_MODES = [
+            { id: 'random', label: '완전 랜덤' },
+            { id: 'gender', label: '남녀 성비 균등' },
+            { id: 'score', label: '이전 성적 골고루' },
+            { id: 'genderScore', label: '성별 + 성적 균형' },
+            { id: 'mix', label: '최대한 섞기 (이전 모둠과 안 겹치게)' },
+        ];
+
+        function genderKey(g) {
+            const v = (g || '').trim();
+            if (/^(남|남자|boy|m|male)$/i.test(v)) return 'M';
+            if (/^(여|여자|girl|f|female)$/i.test(v)) return 'F';
+            return v ? v : '?';
+        }
+
+        function computeCoOccurrence(rounds) {
+            const map = {};
+            rounds.forEach(r => {
+                r.groups.forEach(g => {
+                    const ids = g.memberIds;
+                    for (let i = 0; i < ids.length; i++) {
+                        for (let j = i + 1; j < ids.length; j++) {
+                            const a = ids[i], b = ids[j];
+                            (map[a] = map[a] || {})[b] = (map[a][b] || 0) + 1;
+                            (map[b] = map[b] || {})[a] = (map[b][a] || 0) + 1;
+                        }
+                    }
+                });
+            });
+            return map;
+        }
+
+        // Returns { groups, unassigned: [] } — groups are copies with the
+        // previously-unassigned students added according to `mode`.
+        function autoAssignUnassigned(draft, students, mode, rounds) {
+            const byId = Object.fromEntries(students.map(s => [s.id, s]));
+            const groups = draft.groups.map(g => ({ ...g, memberIds: [...g.memberIds] }));
+            let order = shuffle(draft.unassigned);
+            let scoreFn;
+
+            if (mode === 'gender') {
+                scoreFn = (g, sid) => {
+                    const gk = genderKey(byId[sid].gender);
+                    const same = g.memberIds.filter(id => byId[id] && genderKey(byId[id].gender) === gk).length;
+                    return same * 1000 + g.memberIds.length + Math.random() * 0.01;
+                };
+            } else if (mode === 'score') {
+                order = order.slice().sort((a, b) => (Number(byId[b].score) || 0) - (Number(byId[a].score) || 0));
+                scoreFn = (g) => g.memberIds.reduce((sum, id) => sum + (byId[id] ? Number(byId[id].score) || 0 : 0), 0) + Math.random() * 0.01;
+            } else if (mode === 'genderScore') {
+                order = order.slice().sort((a, b) => (Number(byId[b].score) || 0) - (Number(byId[a].score) || 0));
+                scoreFn = (g, sid) => {
+                    const gk = genderKey(byId[sid].gender);
+                    const same = g.memberIds.filter(id => byId[id] && genderKey(byId[id].gender) === gk).length;
+                    const scoreSum = g.memberIds.reduce((sum, id) => sum + (byId[id] ? Number(byId[id].score) || 0 : 0), 0);
+                    return same * 100000 + scoreSum + Math.random() * 0.01;
+                };
+            } else if (mode === 'mix') {
+                const co = computeCoOccurrence(rounds || []);
+                scoreFn = (g, sid) => {
+                    let total = 0;
+                    g.memberIds.forEach(id => { total += (co[sid] && co[sid][id]) || 0; });
+                    return total * 1000 + g.memberIds.length + Math.random() * 0.01;
+                };
+            } else {
+                scoreFn = (g) => g.memberIds.length + Math.random() * 0.01;
+            }
+
+            order.forEach(sid => {
+                let best = groups[0], bestVal = Infinity;
+                groups.forEach(g => {
+                    const v = scoreFn(g, sid);
+                    if (v < bestVal) { bestVal = v; best = g; }
+                });
+                if (best) best.memberIds.push(sid);
+            });
+
+            return { groups, unassigned: [] };
+        }
         const downloadFile = (filename, content, mime = 'application/json') => {
             const blob = new Blob([content], { type: mime });
             const url = URL.createObjectURL(blob);
@@ -529,7 +616,7 @@
         // Roster tab
         // ---------------------------------------------------------------
         function RosterTab({ data, updateData, google, bulkCreateClasses }) {
-            const emptyForm = { number: '', name: '', gender: '', memo: '' };
+            const emptyForm = { number: '', name: '', gender: '', score: '', memo: '' };
             const [form, setForm] = useState(emptyForm);
             const [editingId, setEditingId] = useState(null);
             const [pasteText, setPasteText] = useState('');
@@ -593,7 +680,7 @@
                 setEditingId(null);
             };
 
-            const editStudent = (s) => { setForm({ number: s.number, name: s.name, gender: s.gender || '', memo: s.memo || '' }); setEditingId(s.id); };
+            const editStudent = (s) => { setForm({ number: s.number, name: s.name, gender: s.gender || '', score: s.score || '', memo: s.memo || '' }); setEditingId(s.id); };
             const deleteStudent = (id) => {
                 if (!window.confirm('이 학생을 명단에서 삭제할까요? (기존 기록은 남아있습니다)')) return;
                 updateData(prev => ({ ...prev, students: prev.students.filter(s => s.id !== id) }));
@@ -647,10 +734,11 @@
                         </div>
                     )}
 
-                    <form onSubmit={submitForm} className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-2 mb-6 p-4 bg-white border border-slate-200 rounded-xl shadow-sm">
+                    <form onSubmit={submitForm} className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2 mb-6 p-4 bg-white border border-slate-200 rounded-xl shadow-sm">
                         <input placeholder="번호/학번" value={form.number} onChange={e => setForm({ ...form, number: e.target.value })} className="border rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500" />
                         <input placeholder="이름*" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="border rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500" required />
                         <input placeholder="성별" value={form.gender} onChange={e => setForm({ ...form, gender: e.target.value })} className="border rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500" />
+                        <input placeholder="성적(선택)" value={form.score} onChange={e => setForm({ ...form, score: e.target.value })} className="border rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500" />
                         <input placeholder="메모" value={form.memo} onChange={e => setForm({ ...form, memo: e.target.value })} className="border rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500" />
                         <div className="flex gap-1">
                             <button type="submit" className="flex-1 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700">{editingId ? '수정' : '추가'}</button>
@@ -661,7 +749,7 @@
                     <div className="overflow-x-auto border border-slate-200 rounded-xl mb-8">
                         <table className="min-w-full text-sm">
                             <thead className="bg-slate-50 text-slate-500 text-xs">
-                                <tr><th className="px-3 py-2 text-left">번호</th><th className="px-3 py-2 text-left">이름</th><th className="px-3 py-2 text-left">성별</th><th className="px-3 py-2 text-left">메모</th><th className="px-3 py-2"></th></tr>
+                                <tr><th className="px-3 py-2 text-left">번호</th><th className="px-3 py-2 text-left">이름</th><th className="px-3 py-2 text-left">성별</th><th className="px-3 py-2 text-left">성적</th><th className="px-3 py-2 text-left">메모</th><th className="px-3 py-2"></th></tr>
                             </thead>
                             <tbody>
                                 {students.map(s => (
@@ -669,6 +757,7 @@
                                         <td className="px-3 py-2 whitespace-nowrap">{s.number}</td>
                                         <td className="px-3 py-2 font-semibold whitespace-nowrap">{s.name}</td>
                                         <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{s.gender}</td>
+                                        <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{s.score}</td>
                                         <td className="px-3 py-2 text-slate-500 max-w-[16rem] truncate" title={s.memo}>{s.memo}</td>
                                         <td className="px-3 py-2 text-right whitespace-nowrap">
                                             <button onClick={() => editStudent(s)} className="text-[10px] px-2 py-1 bg-slate-100 rounded hover:bg-slate-200 font-medium mr-1">수정</button>
@@ -676,7 +765,7 @@
                                         </td>
                                     </tr>
                                 ))}
-                                {students.length === 0 && <tr><td colSpan="5" className="px-3 py-8 text-center text-slate-400">등록된 학생이 없습니다.</td></tr>}
+                                {students.length === 0 && <tr><td colSpan="6" className="px-3 py-8 text-center text-slate-400">등록된 학생이 없습니다.</td></tr>}
                             </tbody>
                         </table>
                     </div>
@@ -801,6 +890,7 @@
             const [selectedStudent, setSelectedStudent] = useState(null);
             const [dragOverGroupId, setDragOverGroupId] = useState(null);
             const [expandedRoundId, setExpandedRoundId] = useState(null);
+            const [autoMode, setAutoMode] = useState('random');
 
             const groupCount = mode === 'groupCount' ? Math.max(1, Number(count) || 1) : Math.max(1, Math.ceil(students.length / Math.max(1, Number(size) || 1)));
 
@@ -821,12 +911,14 @@
                 setExpandedRoundId(null);
             };
 
-            const randomFill = () => {
+            const runAutoAssign = () => {
+                if (!draft || draft.unassigned.length === 0) return;
+                setDraft(autoAssignUnassigned(draft, students, autoMode, data.rounds));
+            };
+
+            const resetToUnassigned = () => {
                 if (!draft) return;
-                const pool = shuffle(students.map(s => s.id));
-                const groups = draft.groups.map(g => ({ ...g, memberIds: [], leaderId: null }));
-                pool.forEach((id, idx) => groups[idx % groups.length].memberIds.push(id));
-                setDraft({ groups, unassigned: [] });
+                setDraft({ groups: draft.groups.map(g => ({ ...g, memberIds: [], leaderId: null })), unassigned: students.map(s => s.id) });
             };
 
             const moveStudentToGroup = (studentId, groupId) => {
@@ -917,15 +1009,24 @@
                         </div>
                     ) : (
                         <div className="mb-8">
-                            <div className="flex flex-wrap items-center gap-2 mb-4 p-4 bg-indigo-50 border border-indigo-100 rounded-xl">
+                            <div className="flex flex-wrap items-center gap-2 mb-2 p-4 pb-2 bg-indigo-50 border border-indigo-100 rounded-t-xl">
                                 {editingRoundId && <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-1 rounded-full border border-amber-200">회차 수정 중</span>}
                                 <input value={roundName} onChange={e => setRoundName(e.target.value)} className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[160px]" placeholder="회차 이름" />
-                                <button onClick={randomFill} className="bg-white border border-indigo-200 text-indigo-700 text-xs font-bold px-3 py-2 rounded-lg hover:bg-indigo-100">🎲 무작위 배정</button>
                                 <button onClick={addGroup} className="bg-white border border-slate-200 text-slate-600 text-xs font-bold px-3 py-2 rounded-lg hover:bg-slate-100">＋ 모둠 추가</button>
                                 <button onClick={saveRound} className="bg-emerald-600 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-emerald-700">저장하기</button>
                                 <button onClick={cancelDraft} className="bg-slate-200 text-slate-700 text-xs font-bold px-3 py-2 rounded-lg hover:bg-slate-300">취소</button>
                             </div>
-                            <p className="text-xs text-slate-500 mb-3">학생을 클릭(또는 드래그)해서 이동할 모둠에 놓으면 자유롭게 재배정할 수 있어요. 학생 칩 옆 👑를 누르면 그 모둠의 조장으로 지정됩니다. 이미 저장된 회차도 "수정"으로 다시 불러와 바꿀 수 있습니다.</p>
+                            <div className="flex flex-wrap items-center gap-2 mb-4 p-4 pt-2 bg-indigo-50 border border-t-0 border-indigo-100 rounded-b-xl">
+                                <select value={autoMode} onChange={e => setAutoMode(e.target.value)} className="border rounded-lg px-2 py-2 text-xs bg-white">
+                                    {ASSIGN_MODES.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                                </select>
+                                <button onClick={runAutoAssign} className="bg-indigo-600 text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-indigo-700">🎲 조건에 맞게 자동 배정</button>
+                                <button onClick={resetToUnassigned} className="bg-white border border-slate-200 text-slate-500 text-xs font-bold px-3 py-2 rounded-lg hover:bg-slate-100">↺ 전체 미배정으로</button>
+                            </div>
+                            <p className="text-xs text-slate-500 mb-3">
+                                조장·분리해야 할 학생 등은 먼저 학생을 클릭(또는 드래그)해 원하는 모둠에 직접 넣어두고, 나머지는 "자동 배정"으로 채우세요 — 이미 넣어둔 학생은 그대로 남고 미배정 학생만 채워집니다.
+                                "성적 골고루"·"성별 균형"은 명단관리에서 입력한 성적/성별을 기준으로 하고, "최대한 섞기"는 이전에 저장된 회차들과 되도록 겹치지 않게 배정합니다. 학생 칩 옆 👑를 누르면 그 모둠의 조장으로 지정됩니다.
+                            </p>
 
                             <div onDragOver={(e) => e.preventDefault()} onDrop={handleDropOnUnassigned}
                                 className={`mb-4 p-3 border-2 border-dashed rounded-xl ${draft.unassigned.length ? 'bg-slate-50 border-slate-300' : 'bg-slate-50/50 border-slate-200'}`}>
