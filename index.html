@@ -407,6 +407,60 @@
             return m ? m[1] : input.trim();
         }
 
+        // Firebase 콘솔의 "복사" 버튼은 순수 JSON이 아니라 import문·주석·initializeApp 호출까지
+        // 포함된 전체 <script> 스니펫을 복사해준다. 그 안에서 firebaseConfig = { ... } 객체만
+        // 중괄호 짝을 맞춰 잘라낸 뒤, JSON 또는 자바스크립트 객체 리터럴로 해석한다.
+        function extractBalancedObject(text, startIdx) {
+            let depth = 0, inString = null;
+            for (let i = startIdx; i < text.length; i++) {
+                const ch = text[i];
+                if (inString) {
+                    if (ch === '\\') { i++; continue; }
+                    if (ch === inString) inString = null;
+                    continue;
+                }
+                if (ch === '"' || ch === "'" || ch === '`') { inString = ch; continue; }
+                if (ch === '{') depth++;
+                else if (ch === '}') {
+                    depth--;
+                    if (depth === 0) return text.slice(startIdx, i + 1);
+                }
+            }
+            return null;
+        }
+
+        function parseFirebaseConfigInput(text) {
+            const trimmed = text.trim();
+            if (!trimmed) return null;
+
+            const named = trimmed.match(/firebaseConfig\s*(?::\s*[\w.<>\[\]]+)?\s*=\s*\{/);
+            let candidate;
+            if (named) {
+                candidate = extractBalancedObject(trimmed, named.index + named[0].length - 1);
+            }
+            if (!candidate) {
+                candidate = trimmed
+                    .replace(/^(export\s+)?(const|let|var)\s+\w+\s*=\s*/, '')
+                    .replace(/;\s*$/, '')
+                    .trim();
+            }
+
+            let obj;
+            try {
+                obj = JSON.parse(candidate);
+            } catch (jsonErr) {
+                try {
+                    obj = new Function('"use strict"; return (' + candidate + ');')();
+                } catch (jsErr) {
+                    throw new Error('Firebase 설정 값을 해석하지 못했습니다. Firebase 콘솔의 코드 스니펫 전체(또는 firebaseConfig 객체 부분)를 그대로 붙여넣어 보세요.');
+                }
+            }
+            if (!obj || typeof obj !== 'object' || !obj.apiKey || !obj.projectId) {
+                throw new Error('apiKey와 projectId가 포함된 firebaseConfig 객체를 찾지 못했습니다. Firebase 콘솔의 코드 스니펫 전체를 그대로 붙여넣어 보세요.');
+            }
+            return obj;
+        }
+
         async function importRosterFromSheet(token, sheetIdOrUrl, range) {
             const spreadsheetId = extractSpreadsheetId(sheetIdOrUrl);
             const json = await sheetsFetch(token, `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`);
@@ -1195,7 +1249,8 @@
                     <section>
                         <h3 className="text-lg font-bold text-slate-900 mb-2">🔄 여러 기기 동기화 (Firebase)</h3>
                         <p className="text-xs text-slate-500 mb-3">Firebase 프로젝트를 만들고 Firestore 설정을 붙여넣으면, 같은 학급 코드를 쓰는 모든 기기(PC·태블릿·휴대폰)에서 실시간으로 데이터가 동기화됩니다. 설정하지 않아도 이 브라우저에서는 계속 사용할 수 있어요.</p>
-                        <textarea value={firebaseConfigText} onChange={e => setFirebaseConfigText(e.target.value)} rows="6" placeholder='{"apiKey":"...","authDomain":"...","projectId":"...","storageBucket":"...","messagingSenderId":"...","appId":"..."}' className="w-full border rounded-lg px-3 py-2 text-xs font-mono" />
+                        <p className="text-xs text-slate-400 mb-2">Firebase 콘솔의 "SDK 설정 및 구성" 코드 스니펫을 <code className="bg-slate-100 px-1 rounded">&lt;script&gt;</code> 태그까지 통째로 복사해서 붙여넣어도 됩니다. firebaseConfig 부분만 알아서 찾아 씁니다.</p>
+                        <textarea value={firebaseConfigText} onChange={e => setFirebaseConfigText(e.target.value)} rows="6" placeholder='Firebase 콘솔의 코드 스니펫 전체(또는 firebaseConfig = {...} 부분)를 붙여넣으세요' className="w-full border rounded-lg px-3 py-2 text-xs font-mono" />
                         <div className="flex items-center gap-2 mt-2">
                             <button onClick={applyFirebaseConfig} className="bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-indigo-700">적용</button>
                             <span className={`text-xs font-bold ${connected ? 'text-emerald-600' : 'text-slate-400'}`}>{connected ? '● 연결됨' : '○ 미연결(로컬 저장 모드)'}</span>
@@ -1314,10 +1369,10 @@
 
             const applyFirebaseConfig = () => {
                 try {
-                    const parsed = firebaseConfigText.trim() ? JSON.parse(firebaseConfigText) : null;
+                    const parsed = parseFirebaseConfigInput(firebaseConfigText);
                     setFirebaseConfig(parsed);
                     localStorage.setItem('sga_firebaseConfig', parsed ? JSON.stringify(parsed) : '');
-                } catch (e) { alert('올바른 JSON 형식이 아닙니다.'); }
+                } catch (e) { alert(e.message); }
             };
 
             useEffect(() => {
