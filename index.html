@@ -1425,7 +1425,7 @@
                                     onPointerUp={onGroupPointerUp}
                                     onPointerCancel={onGroupPointerUp}
                                     title={`${groups[gi].name} 전체 이동`}
-                                    className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing rounded-full border-2 flex items-center justify-center shadow-sm ${pal.bg} ${pal.border} ${dragging ? 'shadow-lg scale-125 z-30' : 'z-10 opacity-80 hover:opacity-100'}`}
+                                    className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing rounded-full border-2 flex items-center justify-center shadow-sm ${pal.bg} ${pal.border} ${dragging ? 'shadow-lg scale-125 z-40' : 'z-20 opacity-80 hover:opacity-100'}`}
                                     style={{ left: `${h.x}%`, top: `${h.y}%`, width: '26px', height: '26px', touchAction: 'none', transition: dragging ? 'none' : 'box-shadow .15s, transform .15s' }}>
                                     <span className="text-xs leading-none">🧩</span>
                                 </div>
@@ -1442,7 +1442,7 @@
                                     onPointerMove={onPointerMove}
                                     onPointerUp={onPointerUp}
                                     onPointerCancel={onPointerUp}
-                                    className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing rounded-full border-2 px-2.5 py-1.5 shadow-sm ${pal.bg} ${pal.border} ${dragging ? 'shadow-lg scale-110 z-20' : 'z-10'}`}
+                                    className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing rounded-full border-2 px-2.5 py-1.5 shadow-sm ${pal.bg} ${pal.border} ${dragging ? 'shadow-lg scale-110 z-30' : 'z-10'}`}
                                     style={{ left: `${pos.x}%`, top: `${pos.y}%`, touchAction: 'none', transition: dragging ? 'none' : 'box-shadow .15s, transform .15s' }}>
                                     <span className={`text-xs font-bold ${pal.text} whitespace-nowrap`}>{student.name}</span>
                                 </div>
