@@ -37,7 +37,7 @@
         // ---------------------------------------------------------------
         // Constants & small utilities
         // ---------------------------------------------------------------
-        const DEFAULT_DATA = { students: [], rounds: [], groupRecords: [], individualRecords: [], sessionNotes: [], categories: [] };
+        const DEFAULT_DATA = { students: [], rounds: [], groupRecords: [], individualRecords: [], sessionNotes: [], categories: [], progress: [] };
 
         const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
         const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -255,8 +255,9 @@
 
         const RATING_META = {
             good: { label: '잘함', dot: 'bg-emerald-500', cls: 'bg-emerald-500 text-white border-emerald-500', idleCls: 'bg-white text-emerald-700 border-emerald-500' },
-            mid: { label: '보통', dot: 'bg-amber-400', cls: 'bg-amber-400 text-white border-amber-400', idleCls: 'bg-white text-amber-700 border-amber-400' },
+            mid: { label: '노력중', dot: 'bg-amber-400', cls: 'bg-amber-400 text-white border-amber-400', idleCls: 'bg-white text-amber-700 border-amber-400' },
             low: { label: '노력요함', dot: 'bg-rose-500', cls: 'bg-rose-500 text-white border-rose-500', idleCls: 'bg-white text-rose-700 border-rose-500' },
+            absent: { label: '결석', dot: 'bg-slate-400', cls: 'bg-slate-500 text-white border-slate-500', idleCls: 'bg-white text-slate-600 border-slate-400' },
         };
         const RATING_ORDER = ['good', 'mid', 'low'];
 
@@ -316,6 +317,19 @@
                     {categories.map(c => <option key={c} value={c}>{c}</option>)}
                     <option value="__add__">+ 새 구분 추가</option>
                 </select>
+            );
+        }
+
+        const GENDER_CYCLE = ['', '남', '여'];
+        function GenderCycle({ value, onChange, fullWidth = true }) {
+            const cycle = () => onChange(GENDER_CYCLE[(GENDER_CYCLE.indexOf(value || '') + 1) % GENDER_CYCLE.length]);
+            const cls = value === '남' ? 'bg-sky-50 text-sky-700 border-sky-200'
+                : value === '여' ? 'bg-rose-50 text-rose-700 border-rose-200'
+                : 'bg-slate-50 text-slate-400 border-slate-200';
+            return (
+                <button type="button" onClick={cycle} className={`border rounded-lg font-bold ${fullWidth ? 'w-full px-2 py-2 text-sm' : 'px-2 py-1 text-xs'} ${cls}`}>
+                    {value || '성별'}
+                </button>
             );
         }
 
@@ -631,6 +645,7 @@
             const [bulkPasteText, setBulkPasteText] = useState('');
             const [bulkBusy, setBulkBusy] = useState(false);
             const [bulkMsg, setBulkMsg] = useState('');
+            const [manageGroups, setManageGroups] = useState(false);
             const fileRef = useRef(null);
 
             const formatBulkSummary = (summary) => {
@@ -713,13 +728,25 @@
                 } finally { setBusy(false); }
             };
 
+            if (manageGroups) {
+                return (
+                    <div>
+                        <button onClick={() => setManageGroups(false)} className="text-xs font-bold text-indigo-600 mb-4">← 명단관리로 돌아가기</button>
+                        <AssignTab data={data} updateData={updateData} />
+                    </div>
+                );
+            }
+
             return (
                 <div>
                     <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
                         <h3 className="text-lg font-bold text-slate-900">학생 명단 ({students.length}명)</h3>
-                        <button onClick={() => setShowPaste(!showPaste)} className="text-xs bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded font-bold border border-indigo-100 hover:bg-indigo-100">
-                            {showPaste ? '닫기' : '📋 여러 명 붙여넣기'}
-                        </button>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button onClick={() => setManageGroups(true)} className="text-xs bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded font-bold border border-indigo-100 hover:bg-indigo-100">🎲 모둠 관리</button>
+                            <button onClick={() => setShowPaste(!showPaste)} className="text-xs bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded font-bold border border-indigo-100 hover:bg-indigo-100">
+                                {showPaste ? '닫기' : '📋 여러 명 붙여넣기'}
+                            </button>
+                        </div>
                     </div>
 
                     {showPaste && (
@@ -737,7 +764,7 @@
                     <form onSubmit={submitForm} className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2 mb-6 p-4 bg-white border border-slate-200 rounded-xl shadow-sm">
                         <input placeholder="번호/학번" value={form.number} onChange={e => setForm({ ...form, number: e.target.value })} className="border rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500" />
                         <input placeholder="이름*" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="border rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500" required />
-                        <input placeholder="성별" value={form.gender} onChange={e => setForm({ ...form, gender: e.target.value })} className="border rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500" />
+                        <GenderCycle value={form.gender} onChange={g => setForm({ ...form, gender: g })} />
                         <input placeholder="성적(선택)" value={form.score} onChange={e => setForm({ ...form, score: e.target.value })} className="border rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500" />
                         <input placeholder="메모" value={form.memo} onChange={e => setForm({ ...form, memo: e.target.value })} className="border rounded-lg px-2 py-2 text-sm outline-none focus:border-indigo-500" />
                         <div className="flex gap-1">
@@ -756,7 +783,9 @@
                                     <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50">
                                         <td className="px-3 py-2 whitespace-nowrap">{s.number}</td>
                                         <td className="px-3 py-2 font-semibold whitespace-nowrap">{s.name}</td>
-                                        <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{s.gender}</td>
+                                        <td className="px-3 py-2 whitespace-nowrap">
+                                            <GenderCycle fullWidth={false} value={s.gender} onChange={g => updateData(prev => ({ ...prev, students: prev.students.map(st => st.id === s.id ? { ...st, gender: g } : st) }))} />
+                                        </td>
                                         <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{s.score}</td>
                                         <td className="px-3 py-2 text-slate-500 max-w-[16rem] truncate" title={s.memo}>{s.memo}</td>
                                         <td className="px-3 py-2 text-right whitespace-nowrap">
@@ -1096,7 +1125,7 @@
         // Record tab — one screen: whole-group logging + tap a student for
         // their individual record, plus a student-first history view.
         // ---------------------------------------------------------------
-        function IndivPanel({ student, data, categories, onAddCategory, isLeader, onToggleLeader, onQuickRate, form, setForm, onToggleTag, onAdd, onDelete }) {
+        function IndivPanel({ student, data, categories, onAddCategory, isLeader, onToggleLeader, onQuickRate, onMarkAbsent, form, setForm, onToggleTag, onAdd, onDelete }) {
             const records = data.individualRecords.filter(r => r.studentId === student.id).sort((a, b) => b.createdAt - a.createdAt);
             const quickRatings = records.filter(r => r.rating && !r.content && (r.tags || []).length === 0);
             const detailed = records.filter(r => !(r.rating && !r.content && (r.tags || []).length === 0));
@@ -1104,9 +1133,14 @@
                 <div className="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
                     <div className="flex items-center justify-between mb-3">
                         <p className="font-bold text-sm">{studentLabel(data.students, student.id)} 개인 기록</p>
-                        <button onClick={onToggleLeader} className={`text-xs px-2.5 py-1 rounded-full border font-bold ${isLeader ? 'bg-amber-100 text-amber-700 border-amber-300' : 'bg-white text-slate-500 border-slate-200'}`}>
-                            👑 {isLeader ? '조장 해제' : '조장으로 지정'}
-                        </button>
+                        <div className="flex gap-1.5">
+                            <button onClick={onToggleLeader} className={`text-xs px-2.5 py-1 rounded-full border font-bold ${isLeader ? 'bg-amber-100 text-amber-700 border-amber-300' : 'bg-white text-slate-500 border-slate-200'}`}>
+                                👑 조장
+                            </button>
+                            <button onClick={onMarkAbsent} className="text-xs px-2.5 py-1 rounded-full border font-bold bg-white text-slate-500 border-slate-200 hover:bg-slate-100">
+                                🚫 결석
+                            </button>
+                        </div>
                     </div>
 
                     <p className="text-xs font-bold text-slate-500 mb-1.5">오늘 활동 평가 (탭하면 바로 저장돼요)</p>
@@ -1282,6 +1316,7 @@
                                                 <IndivPanel key={m.id} student={m} data={data} categories={data.categories} onAddCategory={addCategory}
                                                     isLeader={g.leaderId === m.id} onToggleLeader={() => setLeader(g.id, m.id)}
                                                     onQuickRate={(rating) => quickRate(m.id, rating)}
+                                                    onMarkAbsent={() => quickRate(m.id, 'absent')}
                                                     form={indivForm} setForm={setIndivForm} onToggleTag={toggleTag}
                                                     onAdd={() => addIndivRecord(m.id)} onDelete={deleteIndivRecord} />
                                             ))}
@@ -1295,41 +1330,99 @@
             );
         }
 
-        function ByStudentRecord({ data, updateData }) {
-            const students = useMemo(() => [...data.students].sort(byNumberThenName), [data.students]);
-            const [studentId, setStudentId] = useState(students[0]?.id || '');
-            useEffect(() => { if (!students.find(s => s.id === studentId)) setStudentId(students[0]?.id || ''); }, [students]);
-            const [form, setForm] = useState({ category: '', date: todayStr(), roundId: '', rating: null, tags: [], content: '' });
-            const [search, setSearch] = useState('');
-
-            const filteredStudents = students.filter(s => s.name.includes(search) || String(s.number).includes(search));
-            const records = data.individualRecords.filter(r => r.studentId === studentId).sort((a, b) => b.createdAt - a.createdAt);
+        function StudentRecordPanel({ student, data, updateData }) {
+            const records = data.individualRecords.filter(r => r.studentId === student.id).sort((a, b) => b.createdAt - a.createdAt);
             const quickRatings = records.filter(r => r.rating && !r.content && (r.tags || []).length === 0);
             const detailed = records.filter(r => !(r.rating && !r.content && (r.tags || []).length === 0));
+            const [form, setForm] = useState({ category: '', date: todayStr(), roundId: '', rating: null, tags: [], content: '' });
+            const [copyMsg, setCopyMsg] = useState('');
 
             const addRecord = () => {
-                if (!studentId || (!form.content.trim() && form.tags.length === 0 && !form.rating)) return;
-                updateData(prev => ({ ...prev, individualRecords: [{ id: uid(), studentId, category: form.category, date: form.date || todayStr(), roundId: form.roundId || null, rating: form.rating, tags: form.tags, content: form.content.trim(), createdAt: Date.now() }, ...prev.individualRecords] }));
+                if (!form.content.trim() && form.tags.length === 0 && !form.rating) return;
+                updateData(prev => ({ ...prev, individualRecords: [{ id: uid(), studentId: student.id, category: form.category, date: form.date || todayStr(), roundId: form.roundId || null, rating: form.rating, tags: form.tags, content: form.content.trim(), createdAt: Date.now() }, ...prev.individualRecords] }));
                 setForm({ ...form, rating: null, tags: [], content: '' });
             };
             const toggleTag = (tag) => setForm(f => ({ ...f, tags: f.tags.includes(tag) ? f.tags.filter(t => t !== tag) : [...f.tags, tag] }));
             const deleteRecord = (id) => updateData(prev => ({ ...prev, individualRecords: prev.individualRecords.filter(r => r.id !== id) }));
             const addCategory = (name) => updateData(prev => ({ ...prev, categories: prev.categories.includes(name) ? prev.categories : [...prev.categories, name] }));
 
-            const [copyMsg, setCopyMsg] = useState('');
-            const [bulkCopyMsg, setBulkCopyMsg] = useState('');
-
             const copySelectedText = async () => {
-                const s = students.find(s => s.id === studentId);
-                if (!s) return;
                 try {
-                    await copyToClipboard(formatStudentRecordText(s, records));
+                    await copyToClipboard(formatStudentRecordText(student, records));
                     setCopyMsg('복사되었습니다!');
                 } catch (e) {
                     setCopyMsg('복사에 실패했습니다: ' + e.message);
                 }
                 setTimeout(() => setCopyMsg(''), 2500);
             };
+
+            return (
+                <div className="p-3 bg-slate-50 border-t border-slate-100">
+                    <div className="flex justify-end items-center mb-2">
+                        <button onClick={copySelectedText} className="text-xs bg-white border border-slate-200 px-3 py-1.5 rounded-lg font-bold hover:bg-slate-100">📋 텍스트로 복사하기</button>
+                    </div>
+                    {copyMsg && <p className="text-xs text-emerald-600 mb-2 text-right">{copyMsg}</p>}
+                    <div className="p-3 bg-white border border-slate-200 rounded-xl mb-3 space-y-2">
+                        <div className="flex flex-wrap gap-2">
+                            <CategorySelect categories={data.categories} value={form.category} onChange={c => setForm({ ...form, category: c })} onAddCategory={addCategory} />
+                            <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className="border rounded-lg px-2 py-1.5 text-xs" />
+                            <select value={form.roundId} onChange={e => setForm({ ...form, roundId: e.target.value })} className="border rounded-lg px-2 py-1.5 text-xs">
+                                <option value="">관련 회차 없음</option>
+                                {data.rounds.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                            </select>
+                        </div>
+                        <RatingButtons value={form.rating} onChange={(v) => setForm({ ...form, rating: v })} />
+                        <TagPicker selected={form.tags} onToggle={toggleTag} />
+                        {form.tags.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                                {form.tags.map(t => <span key={t} className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-100">{t}</span>)}
+                            </div>
+                        )}
+                        <textarea value={form.content} onChange={e => setForm({ ...form, content: e.target.value })} rows="3" placeholder="관찰 및 특기사항을 입력하세요" className="w-full border rounded-lg px-3 py-2 text-sm" />
+                        <div className="flex justify-end">
+                            <button onClick={addRecord} className="bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-indigo-700">기록 추가</button>
+                        </div>
+                    </div>
+
+                    {quickRatings.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mb-3">
+                            {quickRatings.map(r => (
+                                <span key={r.id} className="group inline-flex items-center gap-1 pl-1.5 pr-1 py-1 rounded-full bg-white border border-slate-200 text-[10px] font-bold text-slate-500">
+                                    <RatingDot rating={r.rating} />{r.date.slice(5)}
+                                    <button onClick={() => deleteRecord(r.id)} className="ml-0.5 text-slate-300 hover:text-rose-500">×</button>
+                                </span>
+                            ))}
+                        </div>
+                    )}
+
+                    <div className="space-y-2">
+                        {detailed.map(r => (
+                            <div key={r.id} className="flex justify-between items-start bg-white border border-slate-100 rounded-lg p-3">
+                                <div>
+                                    {r.category && <span className="text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-bold mr-1">{r.category}</span>}
+                                    <span className="text-[10px] text-slate-400 font-bold">{r.date}</span>
+                                    {r.rating && <span className="ml-1 inline-flex items-center gap-1"><RatingDot rating={r.rating} />{RATING_META[r.rating].label}</span>}
+                                    <div className="mt-1">
+                                        {(r.tags || []).map(t => <span key={t} className="inline-block text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded-full mr-1 mb-1">{t}</span>)}
+                                    </div>
+                                    {r.content && <p className="text-sm text-slate-700">{r.content}</p>}
+                                </div>
+                                <button onClick={() => deleteRecord(r.id)} className="text-[10px] text-rose-500 hover:underline shrink-0 ml-2">삭제</button>
+                            </div>
+                        ))}
+                        {records.length === 0 && <p className="text-xs text-slate-300">기록 없음</p>}
+                    </div>
+                </div>
+            );
+        }
+
+        function ByStudentRecord({ data, updateData }) {
+            const students = useMemo(() => [...data.students].sort(byNumberThenName), [data.students]);
+            const [expandedId, setExpandedId] = useState(null);
+            const [search, setSearch] = useState('');
+            const [bulkCopyMsg, setBulkCopyMsg] = useState('');
+
+            const filteredStudents = students.filter(s => s.name.includes(search) || String(s.number).includes(search));
 
             const copyAllText = async () => {
                 const parts = students
@@ -1347,84 +1440,22 @@
             };
 
             return (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div>
-                        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="학생 검색" className="w-full border rounded-lg px-3 py-2 text-sm mb-2" />
-                        <button onClick={copyAllText} className="w-full text-xs bg-indigo-50 text-indigo-700 px-3 py-2 rounded-lg font-bold border border-indigo-100 hover:bg-indigo-100 mb-1">📋 전체 학생 기록 한 번에 복사</button>
-                        {bulkCopyMsg && <p className="text-xs text-emerald-600 mb-2">{bulkCopyMsg}</p>}
-                        <div className="border border-slate-200 rounded-xl bg-white max-h-[28rem] overflow-y-auto">
-                            {filteredStudents.map(s => (
-                                <button key={s.id} onClick={() => setStudentId(s.id)} className={`w-full text-left px-3 py-2 text-sm border-b border-slate-50 hover:bg-slate-50 ${studentId === s.id ? 'bg-indigo-50 text-indigo-700 font-bold' : ''}`}>
-                                    {s.number ? `${s.number}번 ` : ''}{s.name}
+                <div>
+                    <input value={search} onChange={e => setSearch(e.target.value)} placeholder="학생 검색" className="w-full border rounded-lg px-3 py-2 text-sm mb-2" />
+                    <button onClick={copyAllText} className="w-full text-xs bg-indigo-50 text-indigo-700 px-3 py-2 rounded-lg font-bold border border-indigo-100 hover:bg-indigo-100 mb-1">📋 전체 학생 기록 한 번에 복사</button>
+                    {bulkCopyMsg && <p className="text-xs text-emerald-600 mb-3">{bulkCopyMsg}</p>}
+                    <div className="border border-slate-200 rounded-xl bg-white overflow-hidden">
+                        {filteredStudents.map(s => (
+                            <div key={s.id} className="border-b border-slate-50 last:border-b-0">
+                                <button onClick={() => setExpandedId(expandedId === s.id ? null : s.id)}
+                                    className={`w-full text-left px-3 py-2.5 text-sm hover:bg-slate-50 flex items-center justify-between ${expandedId === s.id ? 'bg-indigo-50 text-indigo-700 font-bold' : ''}`}>
+                                    <span>{s.number ? `${s.number}번 ` : ''}{s.name}</span>
+                                    <span className="text-slate-300 text-xs">{expandedId === s.id ? '▲' : '▼'}</span>
                                 </button>
-                            ))}
-                            {filteredStudents.length === 0 && <p className="text-xs text-slate-400 p-3">학생이 없습니다.</p>}
-                        </div>
-                    </div>
-                    <div className="md:col-span-2">
-                        {!studentId ? (
-                            <p className="text-sm text-slate-500">학생을 먼저 선택하세요.</p>
-                        ) : (
-                            <React.Fragment>
-                                <div className="mb-3">
-                                    <div className="flex justify-between items-center">
-                                        <h3 className="text-lg font-bold text-slate-900">{studentLabel(students, studentId)}의 기록</h3>
-                                        <button onClick={copySelectedText} className="text-xs bg-slate-100 px-3 py-1.5 rounded-lg font-bold hover:bg-slate-200">📋 텍스트로 복사하기</button>
-                                    </div>
-                                    {copyMsg && <p className="text-xs text-emerald-600 mt-1 text-right">{copyMsg}</p>}
-                                </div>
-                                <div className="p-4 bg-white border border-slate-200 rounded-xl mb-4 space-y-2">
-                                    <div className="flex flex-wrap gap-2">
-                                        <CategorySelect categories={data.categories} value={form.category} onChange={c => setForm({ ...form, category: c })} onAddCategory={addCategory} />
-                                        <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} className="border rounded-lg px-2 py-1.5 text-xs" />
-                                        <select value={form.roundId} onChange={e => setForm({ ...form, roundId: e.target.value })} className="border rounded-lg px-2 py-1.5 text-xs">
-                                            <option value="">관련 회차 없음</option>
-                                            {data.rounds.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-                                        </select>
-                                    </div>
-                                    <RatingButtons value={form.rating} onChange={(v) => setForm({ ...form, rating: v })} />
-                                    <TagPicker selected={form.tags} onToggle={toggleTag} />
-                                    {form.tags.length > 0 && (
-                                        <div className="flex flex-wrap gap-1">
-                                            {form.tags.map(t => <span key={t} className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-100">{t}</span>)}
-                                        </div>
-                                    )}
-                                    <textarea value={form.content} onChange={e => setForm({ ...form, content: e.target.value })} rows="3" placeholder="관찰 및 특기사항을 입력하세요" className="w-full border rounded-lg px-3 py-2 text-sm" />
-                                    <div className="flex justify-end">
-                                        <button onClick={addRecord} className="bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-indigo-700">기록 추가</button>
-                                    </div>
-                                </div>
-
-                                {quickRatings.length > 0 && (
-                                    <div className="flex flex-wrap gap-1.5 mb-3">
-                                        {quickRatings.map(r => (
-                                            <span key={r.id} className="group inline-flex items-center gap-1 pl-1.5 pr-1 py-1 rounded-full bg-white border border-slate-200 text-[10px] font-bold text-slate-500">
-                                                <RatingDot rating={r.rating} />{r.date.slice(5)}
-                                                <button onClick={() => deleteRecord(r.id)} className="ml-0.5 text-slate-300 hover:text-rose-500">×</button>
-                                            </span>
-                                        ))}
-                                    </div>
-                                )}
-
-                                <div className="space-y-2">
-                                    {detailed.map(r => (
-                                        <div key={r.id} className="flex justify-between items-start bg-white border border-slate-100 rounded-lg p-3">
-                                            <div>
-                                                {r.category && <span className="text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-bold mr-1">{r.category}</span>}
-                                                <span className="text-[10px] text-slate-400 font-bold">{r.date}</span>
-                                                {r.rating && <span className="ml-1 inline-flex items-center gap-1"><RatingDot rating={r.rating} />{RATING_META[r.rating].label}</span>}
-                                                <div className="mt-1">
-                                                    {(r.tags || []).map(t => <span key={t} className="inline-block text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded-full mr-1 mb-1">{t}</span>)}
-                                                </div>
-                                                {r.content && <p className="text-sm text-slate-700">{r.content}</p>}
-                                            </div>
-                                            <button onClick={() => deleteRecord(r.id)} className="text-[10px] text-rose-500 hover:underline shrink-0 ml-2">삭제</button>
-                                        </div>
-                                    ))}
-                                    {records.length === 0 && <p className="text-xs text-slate-300">기록 없음</p>}
-                                </div>
-                            </React.Fragment>
-                        )}
+                                {expandedId === s.id && <StudentRecordPanel student={s} data={data} updateData={updateData} />}
+                            </div>
+                        ))}
+                        {filteredStudents.length === 0 && <p className="text-xs text-slate-400 p-3">학생이 없습니다.</p>}
                     </div>
                 </div>
             );
@@ -1432,30 +1463,175 @@
 
         function RecordTab({ data, updateData }) {
             const [mode, setMode] = useState('byRound');
-            const [manageGroups, setManageGroups] = useState(false);
-
-            if (manageGroups) {
-                return (
-                    <div>
-                        <button onClick={() => setManageGroups(false)} className="text-xs font-bold text-indigo-600 mb-4">← 활동 기록으로 돌아가기</button>
-                        <AssignTab data={data} updateData={updateData} />
-                    </div>
-                );
-            }
 
             return (
                 <div>
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                         <h3 className="text-lg font-bold text-slate-900">활동 기록</h3>
-                        <div className="flex flex-wrap items-center gap-2">
-                            <button onClick={() => setManageGroups(true)} className="text-xs bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg font-bold border border-indigo-100 hover:bg-indigo-100">🎲 모둠 관리</button>
-                            <div className="flex bg-slate-100 rounded-lg p-1 text-xs font-medium">
-                                <button onClick={() => setMode('byRound')} className={`px-3 py-1.5 rounded-md ${mode === 'byRound' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>모둠별</button>
-                                <button onClick={() => setMode('byStudent')} className={`px-3 py-1.5 rounded-md ${mode === 'byStudent' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>학생별 전체보기</button>
-                            </div>
+                        <div className="flex bg-slate-100 rounded-lg p-1 text-xs font-medium">
+                            <button onClick={() => setMode('byRound')} className={`px-3 py-1.5 rounded-md ${mode === 'byRound' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>모둠별</button>
+                            <button onClick={() => setMode('byStudent')} className={`px-3 py-1.5 rounded-md ${mode === 'byStudent' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>학생별 전체보기</button>
                         </div>
                     </div>
                     {mode === 'byRound' ? <ByRoundRecord data={data} updateData={updateData} /> : <ByStudentRecord data={data} updateData={updateData} />}
+                </div>
+            );
+        }
+
+        // ---------------------------------------------------------------
+        // Progress (진도) tab
+        // ---------------------------------------------------------------
+        function sortLessons(list) {
+            return [...list].sort((a, b) => {
+                const na = parseFloat(a.lesson), nb = parseFloat(b.lesson);
+                if (!isNaN(na) && !isNaN(nb) && na !== nb) return na - nb;
+                return (a.lesson || '').localeCompare(b.lesson || '', 'ko');
+            });
+        }
+
+        function ProgressTab({ data, updateData, classCode, classCodes, fetchAllProgress, applyLessonToAllClasses }) {
+            const [mode, setMode] = useState('mine');
+            const [form, setForm] = useState({ lesson: '', content: '' });
+            const [editingId, setEditingId] = useState(null);
+            const [applyMsg, setApplyMsg] = useState('');
+            const [compareData, setCompareData] = useState(null);
+            const [loadingCompare, setLoadingCompare] = useState(false);
+
+            const progress = data.progress || [];
+            const sorted = sortLessons(progress);
+
+            const resetForm = () => { setForm({ lesson: '', content: '' }); setEditingId(null); };
+
+            const submit = (e) => {
+                e.preventDefault();
+                if (!form.lesson.trim()) return;
+                updateData(prev => {
+                    const list = prev.progress || [];
+                    if (editingId) {
+                        return { ...prev, progress: list.map(p => p.id === editingId ? { ...p, lesson: form.lesson.trim(), content: form.content, updatedAt: Date.now() } : p) };
+                    }
+                    const existing = list.find(p => p.lesson === form.lesson.trim());
+                    if (existing) {
+                        return { ...prev, progress: list.map(p => p.id === existing.id ? { ...p, content: form.content, updatedAt: Date.now() } : p) };
+                    }
+                    return { ...prev, progress: [...list, { id: uid(), lesson: form.lesson.trim(), content: form.content, updatedAt: Date.now() }] };
+                });
+                resetForm();
+            };
+
+            const startEdit = (p) => { setForm({ lesson: p.lesson, content: p.content }); setEditingId(p.id); };
+            const remove = (id) => {
+                if (!window.confirm('이 차시 기록을 삭제할까요?')) return;
+                updateData(prev => ({ ...prev, progress: (prev.progress || []).filter(p => p.id !== id) }));
+                if (editingId === id) resetForm();
+            };
+
+            const applyToAll = async (p) => {
+                setApplyMsg('적용 중...');
+                const count = await applyLessonToAllClasses({ lesson: p.lesson, content: p.content });
+                setApplyMsg(`${count}개 학급에 적용했습니다.`);
+                setTimeout(() => setApplyMsg(''), 3000);
+            };
+
+            const loadCompare = async () => {
+                setLoadingCompare(true);
+                const result = await fetchAllProgress();
+                setCompareData(result);
+                setLoadingCompare(false);
+            };
+
+            useEffect(() => {
+                if (mode === 'compare') loadCompare();
+            }, [mode]);
+
+            const allLessons = useMemo(() => {
+                if (!compareData) return [];
+                const set = new Set();
+                Object.values(compareData).forEach(list => (list || []).forEach(p => set.add(p.lesson)));
+                return sortLessons([...set].map(lesson => ({ lesson }))).map(x => x.lesson);
+            }, [compareData]);
+
+            return (
+                <div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                        <h3 className="text-lg font-bold text-slate-900">진도 기록</h3>
+                        <div className="flex bg-slate-100 rounded-lg p-1 text-xs font-medium">
+                            <button onClick={() => setMode('mine')} className={`px-3 py-1.5 rounded-md ${mode === 'mine' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>이 학급 진도</button>
+                            <button onClick={() => setMode('compare')} className={`px-3 py-1.5 rounded-md ${mode === 'compare' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>전체 학급 비교</button>
+                        </div>
+                    </div>
+
+                    {mode === 'mine' ? (
+                        <div>
+                            <form onSubmit={submit} className="border border-slate-200 rounded-xl p-3 mb-4 bg-slate-50">
+                                <div className="flex flex-col sm:flex-row gap-2 mb-2">
+                                    <input value={form.lesson} onChange={e => setForm({ ...form, lesson: e.target.value })} placeholder="차시 (예: 1, 2-1)" className="sm:w-32 border rounded-lg px-3 py-2 text-sm" />
+                                    <input value={form.content} onChange={e => setForm({ ...form, content: e.target.value })} placeholder="이번 차시 진도/활동 내용" className="flex-1 border rounded-lg px-3 py-2 text-sm" />
+                                </div>
+                                <div className="flex justify-end gap-2">
+                                    {editingId && <button type="button" onClick={resetForm} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500">취소</button>}
+                                    <button type="submit" className="text-xs bg-indigo-600 text-white px-4 py-1.5 rounded-lg font-bold hover:bg-indigo-700">{editingId ? '수정 저장' : '+ 추가'}</button>
+                                </div>
+                            </form>
+                            {applyMsg && <p className="text-xs text-emerald-600 mb-2">{applyMsg}</p>}
+                            <div className="space-y-2">
+                                {sorted.map(p => (
+                                    <div key={p.id} className="border border-slate-200 rounded-xl p-3">
+                                        <div className="flex items-start justify-between gap-2">
+                                            <div className="min-w-0">
+                                                <span className="text-xs font-bold text-indigo-600">{p.lesson}차시</span>
+                                                <p className="text-sm text-slate-700 whitespace-pre-wrap break-words mt-0.5">{p.content || <span className="text-slate-300">내용 없음</span>}</p>
+                                            </div>
+                                            <div className="flex gap-1 shrink-0">
+                                                <button onClick={() => applyToAll(p)} className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">🔁 전체 적용</button>
+                                                <button onClick={() => startEdit(p)} className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">수정</button>
+                                                <button onClick={() => remove(p.id)} className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-rose-500 hover:bg-rose-50">삭제</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                                {sorted.length === 0 && <p className="text-sm text-slate-400">아직 등록된 진도가 없습니다.</p>}
+                            </div>
+                        </div>
+                    ) : (
+                        <div>
+                            <div className="flex items-center justify-between mb-2 gap-2">
+                                <p className="text-xs text-slate-500">저장된 시점의 스냅샷이에요. 최신 내용을 보려면 새로고침하세요.</p>
+                                <button onClick={loadCompare} disabled={loadingCompare} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 font-bold text-indigo-600 hover:bg-indigo-50 shrink-0">{loadingCompare ? '불러오는 중...' : '↻ 새로고침'}</button>
+                            </div>
+                            {compareData && allLessons.length > 0 ? (
+                                <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                                    <table className="min-w-full text-xs">
+                                        <thead className="bg-slate-50">
+                                            <tr>
+                                                <th className="px-3 py-2 text-left font-bold text-slate-500 sticky left-0 bg-slate-50">차시</th>
+                                                {classCodes.map(code => (
+                                                    <th key={code} className={`px-3 py-2 text-left font-bold whitespace-nowrap ${code === classCode ? 'text-indigo-600' : 'text-slate-500'}`}>{code}{code === classCode ? ' (현재)' : ''}</th>
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {allLessons.map(lesson => (
+                                                <tr key={lesson} className="border-t border-slate-100">
+                                                    <td className="px-3 py-2 font-bold text-slate-700 whitespace-nowrap sticky left-0 bg-white">{lesson}차시</td>
+                                                    {classCodes.map(code => {
+                                                        const entry = (compareData[code] || []).find(p => p.lesson === lesson);
+                                                        return (
+                                                            <td key={code} className="px-3 py-2 max-w-[14rem] truncate text-slate-600" title={entry ? entry.content : ''}>
+                                                                {entry ? (entry.content || <span className="text-slate-300">(내용 없음)</span>) : <span className="text-slate-200">—</span>}
+                                                            </td>
+                                                        );
+                                                    })}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            ) : (
+                                <p className="text-sm text-slate-400">{loadingCompare ? '불러오는 중...' : '비교할 진도 기록이 없습니다.'}</p>
+                            )}
+                        </div>
+                    )}
                 </div>
             );
         }
@@ -1635,7 +1811,7 @@
             const [connected, setConnected] = useState(false);
             const [syncError, setSyncError] = useState('');
             const [data, setData] = useState(DEFAULT_DATA);
-            const [activeTab, setActiveTab] = useState('roster');
+            const [activeTab, setActiveTab] = useState('record');
 
             const google = useGoogleAuth(googleClientId);
 
@@ -1713,6 +1889,7 @@
             const switchClass = (code) => {
                 setClassCode(code);
                 localStorage.setItem('sga_classCode', code);
+                setActiveTab('record');
             };
             const createClass = (code) => {
                 setClassCodes(prev => {
@@ -1835,24 +2012,87 @@
                 return summary;
             };
 
+            const fetchAllProgress = async () => {
+                const result = {};
+                for (const code of classCodes) {
+                    if (code === classCode) { result[code] = data.progress || []; continue; }
+                    try {
+                        if (db) {
+                            const snap = await db.collection('classes').doc(code).get();
+                            result[code] = snap.exists ? (snap.data().progress || []) : [];
+                        } else {
+                            const raw = localStorage.getItem(`sga_data_${code}`);
+                            result[code] = raw ? (JSON.parse(raw).progress || []) : [];
+                        }
+                    } catch (e) {
+                        result[code] = [];
+                    }
+                }
+                return result;
+            };
+
+            const upsertLesson = (list, lesson, content) => {
+                const existing = list.find(p => p.lesson === lesson);
+                return existing
+                    ? list.map(p => p.id === existing.id ? { ...p, content, updatedAt: Date.now() } : p)
+                    : [...list, { id: uid(), lesson, content, updatedAt: Date.now() }];
+            };
+
+            const applyLessonToAllClasses = async ({ lesson, content }) => {
+                let count = 0;
+                for (const code of classCodes) {
+                    if (code === classCode) {
+                        updateData(prev => ({ ...prev, progress: upsertLesson(prev.progress || [], lesson, content) }));
+                        count++;
+                        continue;
+                    }
+                    try {
+                        let base = DEFAULT_DATA;
+                        if (db) {
+                            const snap = await db.collection('classes').doc(code).get();
+                            if (snap.exists) base = { ...DEFAULT_DATA, ...snap.data() };
+                        } else {
+                            const raw = localStorage.getItem(`sga_data_${code}`);
+                            if (raw) base = { ...DEFAULT_DATA, ...JSON.parse(raw) };
+                        }
+                        const next = { ...base, progress: upsertLesson(base.progress || [], lesson, content) };
+                        if (db) await db.collection('classes').doc(code).set(next);
+                        else localStorage.setItem(`sga_data_${code}`, JSON.stringify(next));
+                        count++;
+                    } catch (e) {
+                        console.error('apply progress failed for', code, e);
+                    }
+                }
+                return count;
+            };
+
             const TABS = [
                 { id: 'roster', label: '명단관리', icon: '👥' },
+                { id: 'progress', label: '진도기록', icon: '📚' },
                 { id: 'record', label: '활동기록', icon: '📝' },
-                { id: 'settings', label: '설정', icon: '⚙️' },
             ];
 
             return (
                 <div className="min-h-screen bg-slate-50">
                     <header className="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
-                        <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-3">
-                            <div className="flex items-center gap-3">
-                                <span className="text-2xl">🧩</span>
-                                <h1 className="text-lg sm:text-xl font-bold text-indigo-600">모둠 활동 도우미</h1>
-                                <span className={`text-xs font-bold ${connected ? 'text-emerald-600' : firebaseConfig ? 'text-rose-500' : 'text-slate-400'}`}>
+                        <div className="max-w-6xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 min-w-0">
+                                <span className="text-xl sm:text-2xl shrink-0">🧩</span>
+                                <h1 className="text-sm sm:text-xl font-bold text-indigo-600 truncate">모둠 활동 도우미</h1>
+                            </div>
+                            <div className="flex-1 flex justify-center min-w-0">
+                                <ClassSwitcher classCode={classCode} classCodes={classCodes} onSwitch={switchClass} onCreate={createClass} onRemove={removeClassCode} onRename={renameClassCode} />
+                            </div>
+                            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                                <span className={`hidden sm:inline text-xs font-bold whitespace-nowrap ${connected ? 'text-emerald-600' : firebaseConfig ? 'text-rose-500' : 'text-slate-400'}`}>
                                     {connected ? '● 동기화됨' : firebaseConfig ? '● 연결 안 됨' : '○ 이 기기에만 저장'}
                                 </span>
+                                <span className={`sm:hidden inline-block w-2.5 h-2.5 rounded-full ${connected ? 'bg-emerald-500' : firebaseConfig ? 'bg-rose-500' : 'bg-slate-300'}`}
+                                    title={connected ? '동기화됨' : firebaseConfig ? '연결 안 됨' : '이 기기에만 저장'}></span>
+                                <button onClick={() => setActiveTab('settings')}
+                                    className={`text-lg sm:text-xl leading-none ${activeTab === 'settings' ? 'text-indigo-600' : 'text-slate-400 hover:text-indigo-600'}`}
+                                    title="설정">⚙️</button>
                             </div>
-                            <ClassSwitcher classCode={classCode} classCodes={classCodes} onSwitch={switchClass} onCreate={createClass} onRemove={removeClassCode} onRename={renameClassCode} />
                         </div>
                     </header>
 
@@ -1868,6 +2108,7 @@
 
                         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 sm:p-6">
                             {activeTab === 'roster' && <RosterTab data={data} updateData={updateData} google={{ ...google, clientId: googleClientId }} bulkCreateClasses={bulkCreateClasses} />}
+                            {activeTab === 'progress' && <ProgressTab data={data} updateData={updateData} classCode={classCode} classCodes={classCodes} fetchAllProgress={fetchAllProgress} applyLessonToAllClasses={applyLessonToAllClasses} />}
                             {activeTab === 'record' && <RecordTab data={data} updateData={updateData} />}
                             {activeTab === 'settings' && (
                                 <SettingsTab
