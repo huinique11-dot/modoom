@@ -339,6 +339,27 @@
             return { students, groups, roundName };
         }
 
+        // "학급, 번호, 이름" (또는 "학급, 이름") 형식으로 여러 학급의 명단을 한 번에 붙여넣을 때 사용.
+        // 첫 필드(학급)별로 묶어서 { [classCode]: { students, groups: [], roundName: '' } } 형태로 돌려준다.
+        function parseMultiClassPaste(text) {
+            const byClass = {};
+            text.split('\n').map(l => l.trim()).filter(Boolean).forEach(line => {
+                const parts = line.split(/[\t,]+/).map(s => s.trim()).filter(s => s !== '');
+                if (parts.length < 2) return;
+                const classCode = parts[0];
+                let number = '', name = '', memo = '';
+                if (parts.length >= 3 && /^\d+$/.test(parts[1])) {
+                    number = parts[1]; name = parts[2]; memo = parts[3] || '';
+                } else {
+                    name = parts[1]; memo = parts[2] || '';
+                }
+                if (!classCode || !name) return;
+                if (!byClass[classCode]) byClass[classCode] = { students: [], groups: [], roundName: '' };
+                byClass[classCode].students.push({ id: uid(), number, name, gender: '', memo });
+            });
+            return byClass;
+        }
+
         function buildSheetRows(data) {
             const rosterRows = [
                 ['번호', '이름', '성별', '메모'],
@@ -480,7 +501,7 @@
         // ---------------------------------------------------------------
         // Roster tab
         // ---------------------------------------------------------------
-        function RosterTab({ data, updateData, google }) {
+        function RosterTab({ data, updateData, google, bulkCreateClasses }) {
             const emptyForm = { number: '', name: '', gender: '', memo: '' };
             const [form, setForm] = useState(emptyForm);
             const [editingId, setEditingId] = useState(null);
@@ -493,7 +514,42 @@
             const [workbook, setWorkbook] = useState(null); // { fileName, sheets: { name: rows[][] } }
             const [selectedSheet, setSelectedSheet] = useState('');
             const [xlsxMsg, setXlsxMsg] = useState('');
+            const [bulkPasteText, setBulkPasteText] = useState('');
+            const [bulkBusy, setBulkBusy] = useState(false);
+            const [bulkMsg, setBulkMsg] = useState('');
             const fileRef = useRef(null);
+
+            const formatBulkSummary = (summary) => {
+                const ok = summary.filter(s => !s.error);
+                const failed = summary.filter(s => s.error);
+                let text = `${ok.length}개 학급을 만들었습니다: ` + ok.map(s => `${s.code}(${s.count}명)`).join(', ');
+                if (failed.length) text += ` / 실패: ` + failed.map(s => s.code).join(', ');
+                return text;
+            };
+
+            const applyMultiClassPaste = async () => {
+                const groups = parseMultiClassPaste(bulkPasteText);
+                if (!Object.keys(groups).length) { setBulkMsg('인식된 학급이 없습니다. "학급, 번호, 이름" 형식으로 입력했는지 확인하세요.'); return; }
+                setBulkBusy(true); setBulkMsg('');
+                const summary = await bulkCreateClasses(groups);
+                setBulkBusy(false);
+                setBulkPasteText('');
+                setBulkMsg(formatBulkSummary(summary));
+            };
+
+            const importAllSheetsAsClasses = async () => {
+                if (!workbook) return;
+                const groups = {};
+                Object.entries(workbook.sheets).forEach(([name, rows]) => {
+                    const parsed = parseImportedSheet(rows);
+                    if (parsed.students.length) groups[name] = parsed;
+                });
+                if (!Object.keys(groups).length) { setXlsxMsg('가져올 학생 정보가 있는 시트를 찾지 못했습니다.'); return; }
+                setBulkBusy(true);
+                const summary = await bulkCreateClasses(groups);
+                setBulkBusy(false);
+                setXlsxMsg(formatBulkSummary(summary));
+            };
 
             const students = useMemo(() => [...data.students].sort(byNumberThenName), [data.students]);
 
@@ -655,6 +711,11 @@
                                                 }} className="bg-emerald-600 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-emerald-700">
                                                     현재 학급으로 가져오기
                                                 </button>
+                                                {Object.keys(workbook.sheets).length > 1 && (
+                                                    <button onClick={importAllSheetsAsClasses} disabled={bulkBusy} className="bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                                                        {bulkBusy ? '만드는 중...' : `📚 시트 ${Object.keys(workbook.sheets).length}개 전부 학급으로 한 번에 만들기`}
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
                                     );
@@ -662,6 +723,20 @@
                                 {xlsxMsg && <p className="text-xs text-emerald-600 mt-2 font-medium">{xlsxMsg}</p>}
                             </div>
                         )}
+                    </div>
+
+                    <div className="p-4 bg-white border border-slate-200 rounded-xl mb-6">
+                        <h4 className="font-bold text-sm mb-2">🏫 여러 학급 한 번에 만들기</h4>
+                        <p className="text-xs text-slate-500 mb-2">"학급, 번호, 이름" 형식으로 전체 학급의 명단을 한 번에 붙여넣으면 학급이 자동으로 만들어지고 각 학급에 명단이 채워집니다. 번호는 생략해도 됩니다.</p>
+                        <textarea value={bulkPasteText} onChange={e => setBulkPasteText(e.target.value)} rows="8"
+                            className="w-full border rounded-lg p-2 text-sm outline-none focus:border-indigo-500 font-mono"
+                            placeholder={"3-1, 1, 김민준\n3-1, 2, 이서연\n3-2, 1, 박도윤\n3-2, 2, 최지우"} />
+                        <div className="flex items-center gap-2 mt-2">
+                            <button onClick={applyMultiClassPaste} disabled={bulkBusy} className="bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                                {bulkBusy ? '만드는 중...' : '학급 자동 생성 + 명단 등록'}
+                            </button>
+                        </div>
+                        {bulkMsg && <p className="text-xs text-emerald-600 mt-2 font-medium">{bulkMsg}</p>}
                     </div>
 
                     <div className="p-4 bg-white border border-slate-200 rounded-xl">
@@ -1523,6 +1598,66 @@
                 });
             }, [classCode]);
 
+            // 여러 학급의 명단(+모둠)을 한 번에 등록: classGroups = { [학급코드]: { students, groups, roundName } }.
+            // 지금 보고 있는 학급은 화면에 바로 반영되도록 updateData를 쓰고, 나머지 학급은 각자의
+            // 저장소(Firestore 문서 또는 localStorage 항목)에 기존 데이터와 합쳐서 직접 써 준다.
+            const mergeClassImport = (base, imported) => {
+                const existingByNumber = new Map(base.students.filter(s => s.number).map(s => [s.number, s]));
+                const newStudents = imported.students.filter(s => !s.number || !existingByNumber.has(s.number));
+                const next = { ...base, students: [...base.students, ...newStudents] };
+                if (imported.groups && imported.groups.length) {
+                    const resolveId = (parsedId) => {
+                        const ps = imported.students.find(s => s.id === parsedId);
+                        if (!ps) return parsedId;
+                        if (ps.number && existingByNumber.has(ps.number)) return existingByNumber.get(ps.number).id;
+                        return ps.id;
+                    };
+                    const groups = imported.groups.map(g => ({ ...g, memberIds: g.memberIds.map(resolveId), leaderId: null }));
+                    next.rounds = [{ id: uid(), name: imported.roundName || `가져온 모둠`, date: todayStr(), groups, createdAt: Date.now() }, ...base.rounds];
+                }
+                return { next, addedCount: newStudents.length };
+            };
+
+            const bulkCreateClasses = async (classGroups) => {
+                const codes = Object.keys(classGroups).filter(c => c && classGroups[c].students.length);
+                const summary = [];
+                for (const code of codes) {
+                    const imported = classGroups[code];
+                    if (code === classCode) {
+                        let addedCount = 0;
+                        updateData(prev => {
+                            const { next, addedCount: n } = mergeClassImport(prev, imported);
+                            addedCount = n;
+                            return next;
+                        });
+                        summary.push({ code, count: addedCount });
+                        continue;
+                    }
+                    try {
+                        let base = DEFAULT_DATA;
+                        if (db) {
+                            const snap = await db.collection('classes').doc(code).get();
+                            if (snap.exists) base = { ...DEFAULT_DATA, ...snap.data() };
+                        } else {
+                            const raw = localStorage.getItem(`sga_data_${code}`);
+                            if (raw) base = { ...DEFAULT_DATA, ...JSON.parse(raw) };
+                        }
+                        const { next, addedCount } = mergeClassImport(base, imported);
+                        if (db) await db.collection('classes').doc(code).set(next);
+                        else localStorage.setItem(`sga_data_${code}`, JSON.stringify(next));
+                        summary.push({ code, count: addedCount });
+                    } catch (e) {
+                        summary.push({ code, count: 0, error: e.message });
+                    }
+                }
+                setClassCodes(prev => {
+                    const merged = [...new Set([...prev, ...codes])];
+                    localStorage.setItem('sga_classCodes', JSON.stringify(merged));
+                    return merged;
+                });
+                return summary;
+            };
+
             const TABS = [
                 { id: 'roster', label: '명단관리', icon: '👥' },
                 { id: 'assign', label: '모둠배정', icon: '🎲' },
@@ -1556,7 +1691,7 @@
                         </div>
 
                         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 sm:p-6">
-                            {activeTab === 'roster' && <RosterTab data={data} updateData={updateData} google={{ ...google, clientId: googleClientId }} />}
+                            {activeTab === 'roster' && <RosterTab data={data} updateData={updateData} google={{ ...google, clientId: googleClientId }} bulkCreateClasses={bulkCreateClasses} />}
                             {activeTab === 'assign' && <AssignTab data={data} updateData={updateData} />}
                             {activeTab === 'record' && <RecordTab data={data} updateData={updateData} />}
                             {activeTab === 'settings' && (
