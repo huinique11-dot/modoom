@@ -2331,6 +2331,54 @@
             );
         }
 
+        function HelpModal({ onClose }) {
+            return (
+                <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+                    <div className="bg-white rounded-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto p-5 sm:p-6" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-4">
+                            <h2 className="text-lg font-bold text-slate-900">📖 설명서</h2>
+                            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">×</button>
+                        </div>
+
+                        <div className="space-y-5 text-sm text-slate-700 leading-relaxed">
+                            <section>
+                                <h3 className="font-bold text-indigo-600 mb-1">이 앱은요</h3>
+                                <p>학생 명단을 등록하고 모둠을 구성한 뒤, 모둠·개인 활동 기록과 교실 자리 배치, 진도까지 한 곳에서 관리하는 앱입니다. 여러 학급을 맡은 선생님도 학급을 빠르게 전환하며 쓸 수 있어요.</p>
+                            </section>
+
+                            <section>
+                                <h3 className="font-bold text-indigo-600 mb-1">🏫 교실</h3>
+                                <p>가장 최근 모둠 배정을 이름표로 보여줘요. 이름표 하나씩 끌면 그 학생만, 모둠 위의 🧩 손잡이를 끌면 모둠 전체가 함께 움직여서 우리 반 실제 자리 모양대로 자유롭게 배치할 수 있어요.</p>
+                            </section>
+
+                            <section>
+                                <h3 className="font-bold text-indigo-600 mb-1">👥 명단관리</h3>
+                                <p>이름만 입력해도 바로 추가되고, 표를 눌러 바로 수정할 수 있어요. "🎲 모둠 관리"에서 조건에 맞게 자동으로 모둠을 배정할 수도 있습니다.</p>
+                            </section>
+
+                            <section>
+                                <h3 className="font-bold text-indigo-600 mb-1">📝 활동기록</h3>
+                                <p>학생을 탭하면 그 자리에서 신호등(🟢🟡🔴)으로 바로 기록할 수 있고, "키워드·메모로 자세히 기록하기"를 펼치면 교과별 키워드를 골라 메모에 덧붙일 수 있어요.</p>
+                            </section>
+
+                            <section>
+                                <h3 className="font-bold text-indigo-600 mb-1">📚 진도기록</h3>
+                                <p>차시별 진도를 남기고, 여러 학급에 한 번에 적용하거나 전체 학급의 진도를 표로 비교할 수 있어요.</p>
+                            </section>
+
+                            <section className="pt-4 border-t border-slate-100">
+                                <h3 className="font-bold text-indigo-600 mb-2">🙏 출처 및 감사</h3>
+                                <img src="assets/teacherdesk.jpg" alt="TeacherDesk 2 소개 이미지" className="w-full rounded-xl border border-slate-200 mb-3" />
+                                <p>"키워드·메모로 자세히 기록하기"에서 쓰이는 교과별 키워드는 김주현 선생님(인스타그램 <a href="https://www.instagram.com/kimju.zip" target="_blank" rel="noopener noreferrer" className="font-bold">@kimju.zip</a>)의 바탕화면 비서 프로그램 <b>TeacherDesk</b>에서 가져왔습니다. 흔쾌히 사용을 허락해주신 김주현 선생님께 진심으로 감사드립니다.</p>
+                                <p className="mt-2">TeacherDesk는 선생님들의 바탕화면을 예쁘게 꾸며주는 좋은 프로그램이니, 한 번 사용해 보시길 추천합니다.</p>
+                                <a href="https://www.instagram.com/p/DcXdM0bCapv/" target="_blank" rel="noopener noreferrer" className="inline-block mt-2 text-indigo-600 font-bold text-xs">TeacherDesk 소개 인스타그램 게시물 보러가기 →</a>
+                            </section>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
         function App() {
             seedDemoClassIfFirstVisit();
             const [classCode, setClassCode] = useState(localStorage.getItem('sga_classCode') || 'default');
@@ -2351,6 +2399,7 @@
             const [syncError, setSyncError] = useState('');
             const [data, setData] = useState(DEFAULT_DATA);
             const [activeTab, setActiveTab] = useState('record');
+            const [showHelp, setShowHelp] = useState(false);
 
             const google = useGoogleAuth(googleClientId);
 
@@ -2641,12 +2690,17 @@
                                 </span>
                                 <span className={`sm:hidden inline-block w-2.5 h-2.5 rounded-full ${connected ? 'bg-emerald-500' : firebaseConfig ? 'bg-rose-500' : 'bg-slate-300'}`}
                                     title={connected ? '동기화됨' : firebaseConfig ? '연결 안 됨' : '이 기기에만 저장'}></span>
+                                <button onClick={() => setShowHelp(true)}
+                                    className="w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center rounded-full border border-slate-300 text-slate-400 hover:text-indigo-600 hover:border-indigo-300 text-xs sm:text-sm font-bold leading-none"
+                                    title="설명서">?</button>
                                 <button onClick={() => setActiveTab('settings')}
                                     className={`text-lg sm:text-xl leading-none ${activeTab === 'settings' ? 'text-indigo-600' : 'text-slate-400 hover:text-indigo-600'}`}
                                     title="설정">⚙️</button>
                             </div>
                         </div>
                     </header>
+
+                    {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
 
                     <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 pb-24 sm:pb-6">
                         <div className="hidden sm:flex border-b border-slate-200 mb-6 overflow-x-auto whitespace-nowrap">
