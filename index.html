@@ -1709,7 +1709,7 @@
                                 </div>
                                 <input value={sessionNoteText} onChange={e => setSessionNoteText(e.target.value)}
                                     onKeyDown={e => { if (e.key === 'Enter') addSessionNote(); }}
-                                    placeholder="예: 3개의 프렛 안에서 도~도 옥타브 연주 연습" className="flex-1 border rounded-lg px-3 py-2 text-sm" />
+                                    placeholder="예: 3개의 프렛 안에서 도~도 옥타브 연주 연습" className="flex-1 min-w-0 border rounded-lg px-3 py-2 text-sm" />
                                 <button onClick={addSessionNote} className="bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-indigo-700 shrink-0">저장</button>
                             </div>
                             <p className="text-[11px] text-slate-400 mt-1">차시를 입력하면 진도기록에도 같은 내용으로 자동 저장돼요.</p>
