@@ -2423,6 +2423,7 @@
             const [connected, setConnected] = useState(false);
             const [syncError, setSyncError] = useState('');
             const [data, setData] = useState(DEFAULT_DATA);
+            const [dataReady, setDataReady] = useState(false);
             const [activeTab, setActiveTab] = useState('record');
             const [showHelp, setShowHelp] = useState(false);
             const [installPrompt, setInstallPrompt] = useState(null);
@@ -2485,43 +2486,69 @@
 
             useEffect(() => {
                 if (!db || !classCode) return;
-                const unsub = db.collection('classes').doc(classCode).onSnapshot(
+                let cancelled = false;
+                setData(DEFAULT_DATA);
+                setDataReady(false);
+                const docRef = db.collection('classes').doc(classCode);
+                // One-time, server-authoritative check: only seed the cloud doc from
+                // this device's localStorage if the class genuinely has no cloud copy
+                // yet. This must NEVER happen inside the onSnapshot listener below —
+                // its very first callback can be served from an empty/stale local
+                // cache (e.g. this device has simply never opened this class before)
+                // and report `exists: false` even though the class has real data on
+                // the server, which would silently wipe it with a blank `.set()`.
+                // Forcing `source: 'server'` here means this check is only ever
+                // trusted when it actually reached Firestore.
+                docRef.get({ source: 'server' }).then(snap => {
+                    if (cancelled || snap.exists) return;
+                    const raw = localStorage.getItem(`sga_data_${classCode}`);
+                    const seed = raw ? { ...DEFAULT_DATA, ...JSON.parse(raw) } : DEFAULT_DATA;
+                    docRef.set(seed).catch(err => console.error('initial sync seed failed', err));
+                }).catch(err => console.error('server existence check failed', err));
+                const unsub = docRef.onSnapshot(
                     snap => {
+                        if (cancelled) return;
                         setConnected(true);
                         setSyncError('');
+                        // Only accept a snapshot that actually has content — an
+                        // `exists: false` reading (from cache, mid-seed, or a blip)
+                        // is never grounds to blank out what's on screen or, worse,
+                        // to be treated as "loaded" and let updateData below sync a
+                        // blank document over real cloud data.
                         if (snap.exists) {
                             setData({ ...DEFAULT_DATA, ...snap.data() });
-                        } else {
-                            // This class has never synced before. Seed the cloud copy
-                            // with whatever this device already recorded locally
-                            // (localStorage) instead of overwriting it with blank
-                            // data — otherwise connecting Firebase on a device that
-                            // already has real records would wipe them from view.
-                            const raw = localStorage.getItem(`sga_data_${classCode}`);
-                            const seed = raw ? { ...DEFAULT_DATA, ...JSON.parse(raw) } : DEFAULT_DATA;
-                            setData(seed);
-                            db.collection('classes').doc(classCode).set(seed).catch(err => console.error('initial sync seed failed', err));
+                            setDataReady(true);
                         }
                     },
                     err => {
+                        if (cancelled) return;
                         console.error(err);
                         setConnected(false);
                         setSyncError('동기화 실패: ' + err.message + ' — Firestore Database를 만들었는지, 보안 규칙을 게시했는지 확인하세요.');
                     }
                 );
-                return () => unsub();
+                return () => { cancelled = true; unsub(); };
             }, [db, classCode]);
 
             useEffect(() => {
                 if (db) return;
                 const raw = localStorage.getItem(`sga_data_${classCode}`);
                 setData(raw ? { ...DEFAULT_DATA, ...JSON.parse(raw) } : DEFAULT_DATA);
+                setDataReady(true);
             }, [classCode, db]);
 
             const updateData = (updater) => {
                 setData(prev => {
                     const next = typeof updater === 'function' ? updater(prev) : updater;
                     if (db && classCode) {
+                        if (!dataReady) {
+                            // This class's real cloud data hasn't been confirmed loaded
+                            // yet (we're still mid-switch or mid-seed). Never let a write
+                            // race ahead of that — it could permanently overwrite real
+                            // data with whatever placeholder is on screen right now.
+                            console.warn('sync write skipped — class data not loaded yet');
+                            return next;
+                        }
                         try {
                             // Firestore's SDK throws synchronously (not just a rejected
                             // promise) on a field value of `undefined`. A JSON round-trip
@@ -2744,6 +2771,17 @@
                             </div>
                         </div>
                     </header>
+
+                    {db && classCode && !dataReady && !syncError && (
+                        <div className="bg-indigo-50 border-b border-indigo-100 text-indigo-700 text-xs text-center py-1.5">
+                            ☁️ '{classCode}' 학급 데이터를 불러오는 중...
+                        </div>
+                    )}
+                    {syncError && (
+                        <div className="bg-rose-50 border-b border-rose-100 text-rose-600 text-xs text-center py-1.5 px-3">
+                            ⚠️ {syncError}
+                        </div>
+                    )}
 
                     {showHelp && (
                         <HelpModal onClose={() => setShowHelp(false)}
