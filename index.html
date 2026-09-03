@@ -1348,7 +1348,7 @@
                 const dyPct = (42 / canvasSize.height) * 100;
                 const dx = (col - (miniCols - 1) / 2) * dxPct;
                 const dy = (row - (miniRows - 1) / 2) * dyPct;
-                return { x: clampPct(center.x + dx, 6, 94), y: clampPct(center.y + dy, 8, 82) };
+                return { x: clampPct(center.x + dx, 6, 94), y: clampPct(center.y + dy, 8, 88) };
             };
 
             const getPos = (studentId, fallback) => positions[studentId] || savedLayout[studentId] || fallback;
@@ -1457,7 +1457,7 @@
                 let xPct = (leftPx / canvasRect.width) * 100;
                 let yPct = (topPx / canvasRect.height) * 100;
                 xPct = clampPct(xPct, 3, 97);
-                yPct = clampPct(yPct, 4, 84);
+                yPct = clampPct(yPct, 4, 90);
                 d.lastPos = { x: xPct, y: yPct };
                 setPositions(prev => ({ ...prev, [d.studentId]: d.lastPos }));
             };
@@ -1499,13 +1499,13 @@
                     </div>
 
                     <div ref={canvasRef}
-                        className="relative w-full rounded-2xl border-2 border-amber-100 overflow-hidden select-none"
-                        style={{ height: 'min(70vh, 560px)', background: 'linear-gradient(180deg, #fbead3 0%, #fbead3 82%, #fdf6ec 82%, #fdf6ec 100%)', touchAction: 'none' }}>
+                        className="relative w-full h-[54vh] max-h-[420px] sm:h-[65vh] sm:max-h-[560px] rounded-2xl border-2 border-amber-100 overflow-hidden select-none"
+                        style={{ background: 'linear-gradient(180deg, #fbead3 0%, #fbead3 90%, #fdf6ec 90%, #fdf6ec 100%)' }}>
 
                         {/* floor tile texture */}
                         <div className="absolute inset-0" style={{
                             top: '6%',
-                            bottom: '18%',
+                            bottom: '10%',
                             backgroundImage: 'linear-gradient(#f3ddb8 1px, transparent 1px), linear-gradient(90deg, #f3ddb8 1px, transparent 1px)',
                             backgroundSize: '40px 40px',
                             opacity: 0.5,
@@ -1513,12 +1513,13 @@
 
                         {/* 칠판 — bottom of the canvas: this is the teacher's own point of
                             view standing at the front facing the class, so the board sits
-                            near the teacher, not the far wall. */}
-                        <div className="absolute left-1/2 -translate-x-1/2 bottom-2 flex flex-col items-center" style={{ width: 'min(60%, 380px)' }}>
-                            <div className="w-full rounded-lg shadow-inner px-3 py-2.5 flex items-center justify-center gap-2" style={{ background: '#3d5a45', border: '6px solid #8b5e3c' }}>
-                                <span className="text-white/90 text-xs sm:text-sm font-bold tracking-wide">🎵 칠판 🎵</span>
+                            near the teacher, not the far wall. Kept slim so the whole
+                            canvas comfortably fits a phone screen without scrolling. */}
+                        <div className="absolute left-1/2 -translate-x-1/2 bottom-1.5 flex flex-col items-center" style={{ width: 'min(55%, 340px)' }}>
+                            <div className="w-full rounded-lg shadow-inner px-3 py-1.5 flex items-center justify-center gap-2" style={{ background: '#3d5a45', border: '4px solid #8b5e3c' }}>
+                                <span className="text-white/90 text-[11px] sm:text-sm font-bold tracking-wide">🎵 칠판 🎵</span>
                             </div>
-                            <div className="w-[65%] h-1.5 rounded-b-sm" style={{ background: '#c9a876' }}></div>
+                            <div className="w-[65%] h-1 rounded-b-sm" style={{ background: '#c9a876' }}></div>
                         </div>
 
                         {/* group "grab whole cluster" handles — drag to move every member together */}
