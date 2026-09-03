@@ -346,12 +346,32 @@
             return <span className={`inline-block rounded-full ${cls} ${RATING_META[rating].dot}`} title={RATING_META[rating].label}></span>;
         }
 
-        const KEYWORD_GROUPS = [
-            { category: '음악 활동', tags: ['실기·표현', '작품 제작', '감상·비평', '창작 의도', '기법 활용', '공연·전시', '연습 태도', '재료·매체 탐색', '아이디어 발전', '협업 무대'] },
+        // 교과별 활동 키워드 — 설정 탭에서 고른 교과에 따라 첫 번째 키워드 그룹이 바뀐다.
+        const SUBJECT_ACTIVITY_GROUPS = {
+            '음악': { category: '음악 활동', tags: ['실기·표현', '작품 제작', '감상·비평', '창작 의도', '기법 활용', '공연·전시', '연습 태도', '재료·매체 탐색', '아이디어 발전', '협업 무대'] },
+            '국어': { category: '국어 활동', tags: ['글쓰기', '독서·읽기', '고쳐쓰기', '근거 제시', '문학 감상', '어휘 활용', '매체 활용', '낭독·발표', '토론 참여', '요약 정리'] },
+            '영어': { category: '영어 활동', tags: ['말하기', '듣기', '읽기·독해', '쓰기·작문', '어휘 활용', '역할극', '발음·억양', '대화 참여', '문장 구성', '원문 이해'] },
+            '수학': { category: '수학 활동', tags: ['풀이 과정', '개념 연결', '다양한 풀이', '오류 수정', '그래프 해석', '증명·논증', '문제 만들기', '계산 정확성', '수학적 설명', '실생활 적용'] },
+            '과학': { category: '과학 활동', tags: ['실험·관찰', '가설 설정', '변인 통제', '자료 해석', '실험 설계', '탐구 보고서', '오차 분석', '안전 수칙', '모형 제작', '결과 토의'] },
+            '사회': { category: '사회 활동', tags: ['자료 해석', '사례 분석', '논증·주장', '시대 이해', '지도·통계 활용', '가치 판단', '조사·발표', '시사 연결', '답사·체험', '관점 비교'] },
+            '도덕': { category: '도덕 활동', tags: ['자료 해석', '사례 분석', '논증·주장', '시대 이해', '지도·통계 활용', '가치 판단', '조사·발표', '시사 연결', '답사·체험', '관점 비교'] },
+            '한문': { category: '한문 활동', tags: ['말하기', '듣기', '읽기', '쓰기', '어휘·표현', '역할극', '문화 이해', '자료 조사', '발음', '한자 활용'] },
+            '체육': { category: '체육 활동', tags: ['기능 수행', '경기·시합', '전술 이해', '규칙 준수', '심판·기록', '안전 수칙', '체력 향상', '팀워크', '동작 분석', '페어플레이', '연습 태도'] },
+            '미술': { category: '미술 활동', tags: ['실기·표현', '작품 제작', '감상·비평', '창작 의도', '기법 활용', '공연·전시', '연습 태도', '재료·매체 탐색', '아이디어 발전', '협업 무대'] },
+            '정보': { category: '정보 활동', tags: ['코딩 구현', '알고리즘 설계', '오류 수정', '자료 구조', '산출물 제작', '문제 분해', '협업 개발', '데이터 처리', '자동화 적용'] },
+        };
+        const SUBJECTS = Object.keys(SUBJECT_ACTIVITY_GROUPS);
+
+        const BASE_KEYWORD_GROUPS = [
             { category: '수업 활동', tags: ['개념 이해', '탐구·질문', '실습·실기', '경기·시합', '발표', '토의·토론', '실험', '프로젝트', '자료 조사', '문제 해결', '창의적 산출', '꾸준함', '심화 학습', '적용·응용', '자기·동료평가', '포트폴리오'] },
             { category: '교과 역량', tags: ['자기주도 학습', '협업·소통', '창의적 사고', '비판적 사고', '문제해결력', '정보 활용', '발표·표현력', '탐구 지속성', '실생활 연결', '자기 점검(메타인지)'] },
-            { category: '성장 중', tags: ['기초 개념 보완 중', '참여 확대 중', '과제 완성도 높이는 중'] },
+            { category: '성장 중', tags: ['기초 개념 보완 중', '참여 확대 중', '과제 완성도 높이는 중', '풀이 과정 쓰기 연습 중', '질문 늘려 가는 중', '발표에 자신감 붙는 중', '모둠 활동 적응 중', '실습 기능 익히는 중', '제출 기한 지키는 연습 중', '오답 정리 습관 들이는 중', '용어 익히는 중', '스스로 점검 시작'] },
         ];
+
+        function keywordGroupsFor(subject) {
+            const subjectGroup = SUBJECT_ACTIVITY_GROUPS[subject] || SUBJECT_ACTIVITY_GROUPS['음악'];
+            return [subjectGroup, ...BASE_KEYWORD_GROUPS];
+        }
 
         function RatingButtons({ value, onChange }) {
             return (
@@ -445,13 +465,15 @@
             );
         }
 
-        function TagPicker({ selected, onToggle }) {
-            const [openCat, setOpenCat] = useState(KEYWORD_GROUPS[0].category);
-            const active = KEYWORD_GROUPS.find(g => g.category === openCat);
+        function TagPicker({ selected, onToggle, subject }) {
+            const groups = keywordGroupsFor(subject);
+            const [openCat, setOpenCat] = useState(groups[0].category);
+            useEffect(() => { setOpenCat(groups[0].category); }, [subject]);
+            const active = groups.find(g => g.category === openCat) || groups[0];
             return (
                 <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
                     <div className="flex overflow-x-auto bg-slate-50 border-b border-slate-200">
-                        {KEYWORD_GROUPS.map(g => (
+                        {groups.map(g => (
                             <button key={g.category} type="button" onClick={() => setOpenCat(g.category)}
                                 className={`px-3 py-2 text-xs font-bold whitespace-nowrap border-b-2 ${openCat === g.category ? 'border-indigo-600 text-indigo-600 bg-white' : 'border-transparent text-slate-500'}`}>
                                 {g.category}
@@ -1300,13 +1322,17 @@
             const groups = round.groups;
             const clampPct = (v, min, max) => Math.min(max, Math.max(min, v));
 
+            // The board sits at the BOTTOM of this canvas (teacher's own point of
+            // view, standing at the front facing the class) — so group slots and
+            // token defaults are laid out top-heavy, clearing a small top strip
+            // (교실 뒤 label) and a taller bottom strip (the board).
             const groupSlotCenter = (idx) => {
                 const cols = groups.length <= 1 ? 1 : Math.min(4, Math.ceil(Math.sqrt(groups.length)));
                 const rows = Math.ceil(groups.length / cols);
                 const col = idx % cols;
                 const row = Math.floor(idx / cols);
                 const x = cols > 1 ? 18 + col * (64 / (cols - 1)) : 50;
-                const y = rows > 1 ? 32 + row * (48 / (rows - 1)) : 56;
+                const y = rows > 1 ? 68 - row * (48 / (rows - 1)) : 44;
                 return { x, y };
             };
 
@@ -1322,7 +1348,7 @@
                 const dyPct = (42 / canvasSize.height) * 100;
                 const dx = (col - (miniCols - 1) / 2) * dxPct;
                 const dy = (row - (miniRows - 1) / 2) * dyPct;
-                return { x: clampPct(center.x + dx, 6, 94), y: clampPct(center.y + dy, 18, 92) };
+                return { x: clampPct(center.x + dx, 6, 94), y: clampPct(center.y + dy, 8, 82) };
             };
 
             const getPos = (studentId, fallback) => positions[studentId] || savedLayout[studentId] || fallback;
@@ -1431,7 +1457,7 @@
                 let xPct = (leftPx / canvasRect.width) * 100;
                 let yPct = (topPx / canvasRect.height) * 100;
                 xPct = clampPct(xPct, 3, 97);
-                yPct = clampPct(yPct, 16, 96);
+                yPct = clampPct(yPct, 4, 84);
                 d.lastPos = { x: xPct, y: yPct };
                 setPositions(prev => ({ ...prev, [d.studentId]: d.lastPos }));
             };
@@ -1474,18 +1500,21 @@
 
                     <div ref={canvasRef}
                         className="relative w-full rounded-2xl border-2 border-amber-100 overflow-hidden select-none"
-                        style={{ height: 'min(70vh, 560px)', background: 'linear-gradient(180deg, #fdf6ec 0%, #fdf6ec 15%, #fbead3 15%, #fbead3 100%)', touchAction: 'none' }}>
+                        style={{ height: 'min(70vh, 560px)', background: 'linear-gradient(180deg, #fbead3 0%, #fbead3 82%, #fdf6ec 82%, #fdf6ec 100%)', touchAction: 'none' }}>
 
                         {/* floor tile texture */}
                         <div className="absolute inset-0" style={{
-                            top: '15%',
+                            top: '6%',
+                            bottom: '18%',
                             backgroundImage: 'linear-gradient(#f3ddb8 1px, transparent 1px), linear-gradient(90deg, #f3ddb8 1px, transparent 1px)',
                             backgroundSize: '40px 40px',
                             opacity: 0.5,
                         }}></div>
 
-                        {/* 칠판 (front of room) */}
-                        <div className="absolute left-1/2 -translate-x-1/2 top-2 flex flex-col items-center" style={{ width: 'min(60%, 380px)' }}>
+                        {/* 칠판 — bottom of the canvas: this is the teacher's own point of
+                            view standing at the front facing the class, so the board sits
+                            near the teacher, not the far wall. */}
+                        <div className="absolute left-1/2 -translate-x-1/2 bottom-2 flex flex-col items-center" style={{ width: 'min(60%, 380px)' }}>
                             <div className="w-full rounded-lg shadow-inner px-3 py-2.5 flex items-center justify-center gap-2" style={{ background: '#3d5a45', border: '6px solid #8b5e3c' }}>
                                 <span className="text-white/90 text-xs sm:text-sm font-bold tracking-wide">🎵 칠판 🎵</span>
                             </div>
@@ -1528,8 +1557,8 @@
                             );
                         })}
 
-                        {/* 교실 뒤 (back of room) */}
-                        <div className="absolute bottom-1.5 left-0 right-0 flex items-center justify-center gap-2 text-slate-400 text-[11px] font-bold">
+                        {/* 교실 뒤 — top of the canvas, farthest from the teacher's own position */}
+                        <div className="absolute top-1.5 left-0 right-0 flex items-center justify-center gap-2 text-slate-400 text-[11px] font-bold">
                             <span>🚪</span><span>교실 뒤</span><span>🪟</span><span>🧹</span><span>🪟</span>
                         </div>
                     </div>
@@ -1577,7 +1606,7 @@
                         <summary className="text-xs font-bold text-indigo-600 cursor-pointer select-none">키워드·메모로 자세히 기록하기</summary>
                         <div className="mt-2 space-y-2">
                             <CategorySelect categories={categories} value={form.category} onChange={c => setForm({ ...form, category: c })} onAddCategory={onAddCategory} />
-                            <TagPicker selected={form.tags} onToggle={onToggleTag} />
+                            <TagPicker selected={form.tags} onToggle={onToggleTag} subject={data.subject} />
                             {form.tags.length > 0 && (
                                 <div className="flex flex-wrap gap-1">
                                     {form.tags.map(t => <span key={t} className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-100">{t}</span>)}
@@ -1617,6 +1646,7 @@
             const [selectedMemberId, setSelectedMemberId] = useState(null);
             const [indivForm, setIndivForm] = useState({ category: '', tags: [], content: '' });
             const [sessionNoteText, setSessionNoteText] = useState('');
+            const [sessionLesson, setSessionLesson] = useState('');
 
             useEffect(() => { setSelectedMemberId(null); }, [roundId]);
 
@@ -1647,7 +1677,13 @@
             const sessionNotes = data.sessionNotes.filter(n => n.roundId === roundId).sort((a, b) => b.createdAt - a.createdAt);
             const addSessionNote = () => {
                 if (!sessionNoteText.trim()) return;
-                updateData(prev => ({ ...prev, sessionNotes: [{ id: uid(), roundId, date, content: sessionNoteText.trim(), createdAt: Date.now() }, ...prev.sessionNotes] }));
+                const lessonTag = sessionLesson.trim();
+                const content = sessionNoteText.trim();
+                updateData(prev => {
+                    const next = { ...prev, sessionNotes: [{ id: uid(), roundId, date, lesson: lessonTag || null, content, createdAt: Date.now() }, ...prev.sessionNotes] };
+                    if (lessonTag) next.progress = upsertLesson(next.progress || [], lessonTag, content);
+                    return next;
+                });
                 setSessionNoteText('');
             };
             const deleteSessionNote = (id) => updateData(prev => ({ ...prev, sessionNotes: prev.sessionNotes.filter(n => n.id !== id) }));
@@ -1665,16 +1701,26 @@
                         <div className="mb-5 p-4 bg-indigo-50 border border-indigo-100 rounded-2xl">
                             <p className="text-xs font-bold text-indigo-700 mb-2">오늘 수업에서 한 활동 (반 전체)</p>
                             <div className="flex gap-2">
+                                <div className="flex items-center border rounded-lg bg-white w-28 shrink-0 overflow-hidden">
+                                    <button type="button" onClick={() => setSessionLesson(String((parseInt(sessionLesson, 10) || 0) - 1))} className="px-2.5 py-2 text-slate-500 font-bold hover:bg-slate-100 border-r">−</button>
+                                    <input value={sessionLesson} onChange={e => setSessionLesson(e.target.value)} placeholder="차시" className="flex-1 min-w-0 text-center px-1 py-2 text-sm outline-none" />
+                                    <button type="button" onClick={() => setSessionLesson(String((parseInt(sessionLesson, 10) || 0) + 1))} className="px-2.5 py-2 text-slate-500 font-bold hover:bg-slate-100 border-l">＋</button>
+                                </div>
                                 <input value={sessionNoteText} onChange={e => setSessionNoteText(e.target.value)}
                                     onKeyDown={e => { if (e.key === 'Enter') addSessionNote(); }}
                                     placeholder="예: 3개의 프렛 안에서 도~도 옥타브 연주 연습" className="flex-1 border rounded-lg px-3 py-2 text-sm" />
                                 <button onClick={addSessionNote} className="bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-indigo-700 shrink-0">저장</button>
                             </div>
+                            <p className="text-[11px] text-slate-400 mt-1">차시를 입력하면 진도기록에도 같은 내용으로 자동 저장돼요.</p>
                             {sessionNotes.length > 0 && (
                                 <div className="mt-2 space-y-1">
                                     {sessionNotes.map(n => (
                                         <div key={n.id} className="flex justify-between items-start bg-white rounded-lg p-2 border border-indigo-100 text-xs">
-                                            <div><span className="text-slate-400 font-bold mr-1">{n.date}</span><span className="text-slate-700">{n.content}</span></div>
+                                            <div>
+                                                <span className="text-slate-400 font-bold mr-1">{n.date}</span>
+                                                {n.lesson && <span className="text-indigo-600 font-bold mr-1">{n.lesson}차시</span>}
+                                                <span className="text-slate-700">{n.content}</span>
+                                            </div>
                                             <button onClick={() => deleteSessionNote(n.id)} className="text-rose-500 hover:underline ml-2 shrink-0">삭제</button>
                                         </div>
                                     ))}
@@ -1788,7 +1834,7 @@
                             </select>
                         </div>
                         <RatingButtons value={form.rating} onChange={(v) => setForm({ ...form, rating: v })} />
-                        <TagPicker selected={form.tags} onToggle={toggleTag} />
+                        <TagPicker selected={form.tags} onToggle={toggleTag} subject={data.subject} />
                         {form.tags.length > 0 && (
                             <div className="flex flex-wrap gap-1">
                                 {form.tags.map(t => <span key={t} className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-100">{t}</span>)}
@@ -1919,6 +1965,21 @@
             });
         }
 
+        // Upsert a progress (진도) entry by lesson number. `detail` is optional —
+        // omit it to leave an existing entry's detail memo untouched (used when
+        // syncing in from a whole-class activity note, which has no detail of its
+        // own). Never stores a literal `undefined`: Firestore's SDK throws
+        // synchronously on an undefined field value, which previously crashed the
+        // whole app when "전체 적용" carried an entry with no detail set yet.
+        function upsertLesson(list, lesson, content, detail) {
+            const existing = list.find(p => p.lesson === lesson);
+            if (existing) {
+                const nextDetail = detail === undefined ? (existing.detail || '') : (detail || '');
+                return list.map(p => p.id === existing.id ? { ...p, content, detail: nextDetail, updatedAt: Date.now() } : p);
+            }
+            return [...list, { id: uid(), lesson, content, detail: detail || '', updatedAt: Date.now() }];
+        }
+
         function ProgressTab({ data, updateData, classCode, classCodes, fetchAllProgress, applyLessonToAllClasses }) {
             const [mode, setMode] = useState('mine');
             const [form, setForm] = useState({ lesson: '', content: '' });
@@ -1997,7 +2058,9 @@
             return (
                 <div>
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-                        <h3 className="text-lg font-bold text-slate-900">진도 기록</h3>
+                        <h3 className="text-lg font-bold text-slate-900">
+                            <InlineEditText value={data.progressTitle || '진도 기록'} onChange={v => updateData(prev => ({ ...prev, progressTitle: v.trim() || '진도 기록' }))} />
+                        </h3>
                         <div className="flex bg-slate-100 rounded-lg p-1 text-xs font-medium">
                             <button onClick={() => setMode('mine')} className={`px-3 py-1.5 rounded-md ${mode === 'mine' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>이 학급 진도</button>
                             <button onClick={() => setMode('compare')} className={`px-3 py-1.5 rounded-md ${mode === 'compare' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>전체 학급 비교</button>
@@ -2158,6 +2221,19 @@
                             <button onClick={doExport} disabled={exportBusy} className="bg-emerald-600 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50">{exportBusy ? '내보내는 중...' : '전체 데이터 시트로 내보내기'}</button>
                         </div>
                         {(google.error || exportMsg) && <p className="text-xs text-slate-500 mt-2 break-all">{google.error || exportMsg}</p>}
+                    </section>
+
+                    <section>
+                        <h3 className="text-lg font-bold text-slate-900 mb-2">📚 교과 선택</h3>
+                        <p className="text-xs text-slate-500 mb-3">기록 화면의 "키워드·메모로 자세히 기록하기"에서 보여줄 교과별 키워드를 고릅니다.</p>
+                        <div className="flex flex-wrap gap-1.5">
+                            {SUBJECTS.map(s => (
+                                <button key={s} onClick={() => updateData(prev => ({ ...prev, subject: s }))}
+                                    className={`text-xs px-3 py-1.5 rounded-full border font-bold ${(data.subject || '음악') === s ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'}`}>
+                                    {s}
+                                </button>
+                            ))}
+                        </div>
                     </section>
 
                     <section>
@@ -2351,7 +2427,15 @@
                 setData(prev => {
                     const next = typeof updater === 'function' ? updater(prev) : updater;
                     if (db && classCode) {
-                        db.collection('classes').doc(classCode).set(next).catch(err => console.error('sync write failed', err));
+                        try {
+                            // Firestore's SDK throws synchronously (not just a rejected
+                            // promise) on a field value of `undefined`. A JSON round-trip
+                            // drops those keys, so a slip elsewhere never crashes the app.
+                            const safe = JSON.parse(JSON.stringify(next));
+                            db.collection('classes').doc(classCode).set(safe).catch(err => console.error('sync write failed', err));
+                        } catch (err) {
+                            console.error('sync write failed', err);
+                        }
                     } else {
                         localStorage.setItem(`sga_data_${classCode}`, JSON.stringify(next));
                     }
@@ -2502,13 +2586,6 @@
                     }
                 }
                 return result;
-            };
-
-            const upsertLesson = (list, lesson, content, detail) => {
-                const existing = list.find(p => p.lesson === lesson);
-                return existing
-                    ? list.map(p => p.id === existing.id ? { ...p, content, detail, updatedAt: Date.now() } : p)
-                    : [...list, { id: uid(), lesson, content, detail, updatedAt: Date.now() }];
             };
 
             const applyLessonToAllClasses = async ({ lesson, content, detail }) => {
