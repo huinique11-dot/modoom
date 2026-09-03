@@ -2318,8 +2318,19 @@
                     snap => {
                         setConnected(true);
                         setSyncError('');
-                        if (snap.exists) setData({ ...DEFAULT_DATA, ...snap.data() });
-                        else db.collection('classes').doc(classCode).set(DEFAULT_DATA);
+                        if (snap.exists) {
+                            setData({ ...DEFAULT_DATA, ...snap.data() });
+                        } else {
+                            // This class has never synced before. Seed the cloud copy
+                            // with whatever this device already recorded locally
+                            // (localStorage) instead of overwriting it with blank
+                            // data — otherwise connecting Firebase on a device that
+                            // already has real records would wipe them from view.
+                            const raw = localStorage.getItem(`sga_data_${classCode}`);
+                            const seed = raw ? { ...DEFAULT_DATA, ...JSON.parse(raw) } : DEFAULT_DATA;
+                            setData(seed);
+                            db.collection('classes').doc(classCode).set(seed).catch(err => console.error('initial sync seed failed', err));
+                        }
                     },
                     err => {
                         console.error(err);
