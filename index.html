@@ -1283,7 +1283,7 @@
         // circle, arch, ...) their room actually has, by hand — instead of
         // picking from preset cluster shapes.
         // ---------------------------------------------------------------
-        function ClassroomTab({ data, updateData }) {
+        function ClassroomTab({ data, updateData, onGroupClick }) {
             const round = data.rounds && data.rounds[0];
             const canvasRef = useRef(null);
             const dragRef = useRef(null);
@@ -1393,6 +1393,7 @@
                     startClientY: e.clientY,
                     memberStart,
                     lastDelta: { x: 0, y: 0 },
+                    moved: false,
                 };
                 setDraggingGroupIdx(groupIdx);
                 e.currentTarget.setPointerCapture(e.pointerId);
@@ -1403,6 +1404,7 @@
                 if (!d) return;
                 const dxPct = ((e.clientX - d.startClientX) / d.canvasRect.width) * 100;
                 const dyPct = ((e.clientY - d.startClientY) / d.canvasRect.height) * 100;
+                if (Math.abs(e.clientX - d.startClientX) > 4 || Math.abs(e.clientY - d.startClientY) > 4) d.moved = true;
                 d.lastDelta = { x: dxPct, y: dyPct };
                 setPositions(prev => {
                     const next = { ...prev };
@@ -1418,6 +1420,12 @@
                 if (!d) return;
                 groupDragRef.current = null;
                 setDraggingGroupIdx(null);
+                if (!d.moved) {
+                    // A tap, not a drag — jump to that group's activity record
+                    // instead of writing a no-op position update.
+                    if (onGroupClick) onGroupClick(groups[d.groupIdx].id);
+                    return;
+                }
                 const updates = {};
                 Object.entries(d.memberStart).forEach(([id, start]) => {
                     updates[id] = { x: clampPct(start.x + d.lastDelta.x, 3, 97), y: clampPct(start.y + d.lastDelta.y, 16, 96) };
@@ -1493,7 +1501,7 @@
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
                         <div>
                             <h3 className="text-lg font-bold text-slate-900">교실</h3>
-                            <p className="text-xs text-slate-400">{round.name} 기준 · 🧩 손잡이를 끌면 모둠 전체가 함께 움직이고, 이름표 하나씩 끌면 그 학생만 움직여요. 찰흙 만지듯 자유롭게 모양을 잡아보세요.</p>
+                            <p className="text-xs text-slate-400">{round.name} 기준 · 🧩 손잡이를 탭하면 그 모둠 기록으로 이동하고, 끌면 모둠 전체가 함께 움직여요. 이름표 하나씩 끌면 그 학생만 움직여요.</p>
                         </div>
                         <button onClick={resetLayout} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 font-bold shrink-0">↺ 기본 배치로</button>
                     </div>
@@ -1533,7 +1541,7 @@
                                     onPointerMove={onGroupPointerMove}
                                     onPointerUp={onGroupPointerUp}
                                     onPointerCancel={onGroupPointerUp}
-                                    title={`${groups[gi].name} 전체 이동`}
+                                    title={`${groups[gi].name} — 탭하면 기록으로 이동, 끌면 전체 이동`}
                                     className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab active:cursor-grabbing rounded-full border-2 flex items-center justify-center shadow-sm ${pal.bg} ${pal.border} ${dragging ? 'shadow-lg scale-125 z-40' : 'z-20 opacity-80 hover:opacity-100'}`}
                                     style={{ left: `${h.x}%`, top: `${h.y}%`, width: '26px', height: '26px', touchAction: 'none', transition: dragging ? 'none' : 'box-shadow .15s, transform .15s' }}>
                                     <span className="text-xs leading-none">🧩</span>
@@ -1637,7 +1645,7 @@
             );
         }
 
-        function ByRoundRecord({ data, updateData }) {
+        function ByRoundRecord({ data, updateData, focusGroupId, onFocusHandled }) {
             const rounds = data.rounds;
             const [roundId, setRoundId] = useState(rounds[0]?.id || '');
             useEffect(() => { if (!rounds.find(r => r.id === roundId)) setRoundId(rounds[0]?.id || ''); }, [rounds]);
@@ -1648,8 +1656,28 @@
             const [indivForm, setIndivForm] = useState({ category: '', tags: [], content: '' });
             const [sessionNoteText, setSessionNoteText] = useState('');
             const [sessionLesson, setSessionLesson] = useState('');
+            const [highlightGroupId, setHighlightGroupId] = useState(null);
 
             useEffect(() => { setSelectedMemberId(null); }, [roundId]);
+
+            // 교실 배치도에서 모둠 손잡이를 탭했을 때: 그 모둠이 속한 회차로 전환하고,
+            // 해당 모둠 카드로 스크롤 + 잠깐 강조 표시.
+            useEffect(() => {
+                if (!focusGroupId) return;
+                const owningRound = rounds.find(r => r.groups.some(g => g.id === focusGroupId));
+                if (owningRound && owningRound.id !== roundId) setRoundId(owningRound.id);
+                setHighlightGroupId(focusGroupId);
+                if (onFocusHandled) onFocusHandled();
+                // eslint-disable-next-line react-hooks/exhaustive-deps
+            }, [focusGroupId]);
+
+            useEffect(() => {
+                if (!highlightGroupId) return;
+                const el = document.getElementById(`group-card-${highlightGroupId}`);
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                const t = setTimeout(() => setHighlightGroupId(null), 1800);
+                return () => clearTimeout(t);
+            }, [highlightGroupId]);
 
             if (rounds.length === 0) return <p className="text-sm text-slate-500">먼저 모둠 배정 탭에서 회차를 만들어주세요.</p>;
 
@@ -1737,7 +1765,8 @@
                                 const gRecords = data.groupRecords.filter(r => r.roundId === round.id && r.groupId === g.id).sort((a, b) => b.createdAt - a.createdAt);
                                 const members = g.memberIds.map(id => data.students.find(s => s.id === id)).filter(Boolean);
                                 return (
-                                    <div key={g.id} className={`border-2 rounded-2xl bg-white overflow-hidden ${pal.border}`}>
+                                    <div key={g.id} id={`group-card-${g.id}`}
+                                        className={`border-2 rounded-2xl bg-white overflow-hidden transition-shadow ${pal.border} ${highlightGroupId === g.id ? 'ring-4 ring-indigo-300' : ''}`}>
                                         <div className={`flex items-center gap-2 px-4 py-2.5 ${pal.bg}`}>
                                             <span className={`w-2.5 h-2.5 rounded-full ${pal.dot}`}></span>
                                             <h4 className={`font-bold text-sm ${pal.text}`}>{g.name}</h4>
@@ -1938,8 +1967,9 @@
             );
         }
 
-        function RecordTab({ data, updateData }) {
+        function RecordTab({ data, updateData, focusGroupId, onFocusHandled }) {
             const [mode, setMode] = useState('byRound');
+            useEffect(() => { if (focusGroupId) setMode('byRound'); }, [focusGroupId]);
 
             return (
                 <div>
@@ -1950,7 +1980,7 @@
                             <button onClick={() => setMode('byStudent')} className={`px-3 py-1.5 rounded-md ${mode === 'byStudent' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>학생별 전체보기</button>
                         </div>
                     </div>
-                    {mode === 'byRound' ? <ByRoundRecord data={data} updateData={updateData} /> : <ByStudentRecord data={data} updateData={updateData} />}
+                    {mode === 'byRound' ? <ByRoundRecord data={data} updateData={updateData} focusGroupId={focusGroupId} onFocusHandled={onFocusHandled} /> : <ByStudentRecord data={data} updateData={updateData} />}
                 </div>
             );
         }
@@ -2425,6 +2455,7 @@
             const [data, setData] = useState(DEFAULT_DATA);
             const [dataReady, setDataReady] = useState(false);
             const [activeTab, setActiveTab] = useState('record');
+            const [focusGroupId, setFocusGroupId] = useState(null);
             const [showHelp, setShowHelp] = useState(false);
             const [installPrompt, setInstallPrompt] = useState(null);
             const [isStandalone, setIsStandalone] = useState(false);
@@ -2563,6 +2594,11 @@
                     }
                     return next;
                 });
+            };
+
+            const goToGroupRecord = (groupId) => {
+                setFocusGroupId(groupId);
+                setActiveTab('record');
             };
 
             const switchClass = (code) => {
@@ -2800,10 +2836,10 @@
                         </div>
 
                         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 sm:p-6">
-                            {activeTab === 'classroom' && <ClassroomTab data={data} updateData={updateData} />}
+                            {activeTab === 'classroom' && <ClassroomTab data={data} updateData={updateData} onGroupClick={goToGroupRecord} />}
                             {activeTab === 'roster' && <RosterTab data={data} updateData={updateData} google={{ ...google, clientId: googleClientId }} bulkCreateClasses={bulkCreateClasses} />}
                             {activeTab === 'progress' && <ProgressTab data={data} updateData={updateData} classCode={classCode} classCodes={classCodes} fetchAllProgress={fetchAllProgress} applyLessonToAllClasses={applyLessonToAllClasses} />}
-                            {activeTab === 'record' && <RecordTab data={data} updateData={updateData} />}
+                            {activeTab === 'record' && <RecordTab data={data} updateData={updateData} focusGroupId={focusGroupId} onFocusHandled={() => setFocusGroupId(null)} />}
                             {activeTab === 'settings' && (
                                 <SettingsTab
                                     classCode={classCode}
