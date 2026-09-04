@@ -2287,6 +2287,23 @@
                         {syncError && (
                             <p className="text-xs text-rose-600 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2 mt-2">⚠️ {syncError}</p>
                         )}
+
+                        <details className="mt-3 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                            <summary className="text-xs font-bold text-amber-700 cursor-pointer select-none">🔒 학생 정보가 저장돼요 — Firestore 보안 규칙 꼭 확인하세요</summary>
+                            <div className="mt-2 space-y-2 text-xs text-slate-600">
+                                <p>Firestore를 <b>"테스트 모드"</b>로 만들면 누구나 인터넷에서 이 프로젝트의 학생 명단·기록을 읽고 지울 수 있어요. 그렇다고 <b>"프로덕션 모드"</b>로 만들기만 해도 자동으로 안전해지는 건 아니에요 — 프로덕션 모드의 기본 규칙은 "전부 차단"이라 규칙을 직접 써 넣지 않으면 이 앱도 동기화가 안 돼요.</p>
+                                <p>Firebase 콘솔 → Firestore Database → 규칙 탭에서 아래처럼 "로그인한(익명 로그인 포함) 사용자만" 허용하도록 바꿔주세요:</p>
+                                <pre className="bg-white border border-amber-100 rounded-lg p-2 overflow-x-auto text-[11px] font-mono">{`rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /classes/{classCode} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}`}</pre>
+                                <p><b>단, 이것도 완전한 보안은 아니에요.</b> 이 앱은 학급 코드만으로 학급을 구분하기 때문에, 학급 코드를 아는(또는 추측하는) 사람은 누구나 그 학급의 데이터를 볼 수 있어요. 즉 학급 코드가 사실상 비밀번호 역할을 해요 — "3-2"처럼 짧고 예측하기 쉬운 코드보다는 다른 사람이 추측하기 어려운 코드를 쓰시고, 공개된 곳(학급 SNS, 공지 게시판 등)에 학급 코드를 그대로 올리지 않는 걸 권해드려요.</p>
+                            </div>
+                        </details>
                     </section>
 
                     <section>
