@@ -823,7 +823,35 @@
                 setXlsxMsg(formatBulkSummary(summary));
             };
 
-            const students = useMemo(() => [...data.students].sort(byNumberThenName), [data.students]);
+            const [sortMode, setSortMode] = useState('number');
+            const latestRound = data.rounds && data.rounds[0];
+            const groupInfoById = useMemo(() => {
+                const map = {};
+                if (latestRound) {
+                    latestRound.groups.forEach((g, gi) => {
+                        g.memberIds.forEach((id, mi) => { map[id] = { groupIdx: gi, groupName: g.name, orderInGroup: mi }; });
+                    });
+                }
+                return map;
+            }, [latestRound]);
+
+            const students = useMemo(() => {
+                const byNumber = [...data.students].sort(byNumberThenName);
+                if (sortMode !== 'group') return byNumber;
+                // Array.prototype.sort is stable, so students with no group (or an
+                // equal group ranking) keep their existing 번호순 order.
+                return [...byNumber].sort((a, b) => {
+                    const ga = groupInfoById[a.id];
+                    const gb = groupInfoById[b.id];
+                    if (ga && gb) {
+                        if (ga.groupIdx !== gb.groupIdx) return ga.groupIdx - gb.groupIdx;
+                        return ga.orderInGroup - gb.orderInGroup;
+                    }
+                    if (ga && !gb) return -1;
+                    if (!ga && gb) return 1;
+                    return 0;
+                });
+            }, [data.students, sortMode, groupInfoById]);
 
             const submitForm = (e) => {
                 e.preventDefault();
@@ -879,7 +907,13 @@
             return (
                 <div>
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
-                        <h3 className="text-lg font-bold text-slate-900">학생 명단 ({students.length}명)</h3>
+                        <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="text-lg font-bold text-slate-900">학생 명단 ({students.length}명)</h3>
+                            <div className="flex bg-slate-100 rounded-lg p-1 text-xs font-medium">
+                                <button onClick={() => setSortMode('number')} className={`px-3 py-1.5 rounded-md ${sortMode === 'number' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>번호순</button>
+                                <button onClick={() => setSortMode('group')} className={`px-3 py-1.5 rounded-md ${sortMode === 'group' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>모둠순</button>
+                            </div>
+                        </div>
                         <div className="flex items-center gap-1.5 sm:gap-2">
                             <button onClick={() => setManageGroups(true)} className="text-xs bg-indigo-50 text-indigo-700 px-2.5 sm:px-3 py-1.5 rounded font-bold border border-indigo-100 hover:bg-indigo-100 whitespace-nowrap">🎲 모둠 관리</button>
                             <button onClick={() => setShowPaste(!showPaste)} className="text-xs bg-indigo-50 text-indigo-700 px-2.5 sm:px-3 py-1.5 rounded font-bold border border-indigo-100 hover:bg-indigo-100 whitespace-nowrap">
@@ -923,7 +957,7 @@
                     <div className="overflow-x-auto border border-slate-200 rounded-xl mb-8">
                         <table className="min-w-full text-sm">
                             <thead className="bg-slate-50 text-slate-500 text-xs">
-                                <tr><th className="px-3 py-2 text-left">번호</th><th className="px-3 py-2 text-left">이름</th><th className="px-3 py-2 text-left">성별</th><th className="px-3 py-2 text-left">성적</th><th className="px-3 py-2 text-left">메모</th><th className="px-3 py-2"></th></tr>
+                                <tr><th className="px-3 py-2 text-left">번호</th><th className="px-3 py-2 text-left">이름</th>{sortMode === 'group' && <th className="px-3 py-2 text-left">모둠</th>}<th className="px-3 py-2 text-left">성별</th><th className="px-3 py-2 text-left">성적</th><th className="px-3 py-2 text-left">메모</th><th className="px-3 py-2"></th></tr>
                             </thead>
                             <tbody>
                                 {students.map(s => (
@@ -934,6 +968,18 @@
                                         <td className="px-3 py-2 font-semibold whitespace-nowrap">
                                             <InlineEditText value={s.name} placeholder="이름" onChange={v => updateStudentField(s.id, 'name', v)} />
                                         </td>
+                                        {sortMode === 'group' && (
+                                            <td className="px-3 py-2 whitespace-nowrap">
+                                                {groupInfoById[s.id] ? (() => {
+                                                    const pal = paletteFor(groupInfoById[s.id].groupIdx);
+                                                    return (
+                                                        <span className={`inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full border ${pal.bg} ${pal.border} ${pal.text}`}>
+                                                            <span className={`w-1.5 h-1.5 rounded-full ${pal.dot}`}></span>{groupInfoById[s.id].groupName}
+                                                        </span>
+                                                    );
+                                                })() : <span className="text-xs text-slate-300">미배정</span>}
+                                            </td>
+                                        )}
                                         <td className="px-3 py-2 whitespace-nowrap">
                                             <GenderCycle fullWidth={false} value={s.gender} onChange={g => updateStudentField(s.id, 'gender', g)} />
                                         </td>
@@ -948,7 +994,7 @@
                                         </td>
                                     </tr>
                                 ))}
-                                {students.length === 0 && <tr><td colSpan="6" className="px-3 py-8 text-center text-slate-400">등록된 학생이 없습니다.</td></tr>}
+                                {students.length === 0 && <tr><td colSpan={sortMode === 'group' ? 7 : 6} className="px-3 py-8 text-center text-slate-400">등록된 학생이 없습니다.</td></tr>}
                             </tbody>
                         </table>
                     </div>
