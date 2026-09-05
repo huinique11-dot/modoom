@@ -2518,6 +2518,12 @@ service cloud.firestore {
             const [syncError, setSyncError] = useState('');
             const [data, setData] = useState(DEFAULT_DATA);
             const [dataReady, setDataReady] = useState(false);
+            // Edits made in the brief window before a class's real cloud data has
+            // loaded (dataReady === false) are queued here instead of being synced
+            // (and then silently lost when the real snapshot overwrites them) — see
+            // updateData and the exists-branch below, which replays this queue on
+            // top of the freshly loaded data as soon as it arrives.
+            const pendingUpdatesRef = useRef([]);
             const [activeTab, setActiveTab] = useState('record');
             const [focusGroupId, setFocusGroupId] = useState(null);
             const [showHelp, setShowHelp] = useState(false);
@@ -2584,6 +2590,7 @@ service cloud.firestore {
                 let cancelled = false;
                 setData(DEFAULT_DATA);
                 setDataReady(false);
+                pendingUpdatesRef.current = [];
                 const docRef = db.collection('classes').doc(classCode);
                 // One-time, server-authoritative check: only seed the cloud doc from
                 // this device's localStorage if the class genuinely has no cloud copy
@@ -2611,7 +2618,23 @@ service cloud.firestore {
                         // to be treated as "loaded" and let updateData below sync a
                         // blank document over real cloud data.
                         if (snap.exists) {
-                            setData({ ...DEFAULT_DATA, ...snap.data() });
+                            let merged = { ...DEFAULT_DATA, ...snap.data() };
+                            if (pendingUpdatesRef.current.length) {
+                                // Replay edits the teacher made while this class's data
+                                // was still loading, on top of the now-authoritative
+                                // server data, then push the result back up — instead
+                                // of letting this snapshot silently overwrite them.
+                                merged = pendingUpdatesRef.current.reduce(
+                                    (acc, updater) => (typeof updater === 'function' ? updater(acc) : updater),
+                                    merged
+                                );
+                                pendingUpdatesRef.current = [];
+                                try {
+                                    const safe = JSON.parse(JSON.stringify(merged));
+                                    docRef.set(safe).catch(err => console.error('pending sync replay failed', err));
+                                } catch (err) { console.error('pending sync replay failed', err); }
+                            }
+                            setData(merged);
                             setDataReady(true);
                         }
                     },
@@ -2638,10 +2661,12 @@ service cloud.firestore {
                     if (db && classCode) {
                         if (!dataReady) {
                             // This class's real cloud data hasn't been confirmed loaded
-                            // yet (we're still mid-switch or mid-seed). Never let a write
-                            // race ahead of that — it could permanently overwrite real
-                            // data with whatever placeholder is on screen right now.
-                            console.warn('sync write skipped — class data not loaded yet');
+                            // yet (we're still mid-switch or mid-seed). Never sync straight
+                            // away — it could permanently overwrite real data with
+                            // whatever placeholder is on screen right now. Instead, queue
+                            // this edit; the effect above replays it on top of the real
+                            // data the moment it arrives, so it isn't lost.
+                            pendingUpdatesRef.current.push(updater);
                             return next;
                         }
                         try {
@@ -2699,7 +2724,12 @@ service cloud.firestore {
                 try {
                     if (db) {
                         const oldRef = db.collection('classes').doc(oldCode);
-                        const snap = await oldRef.get();
+                        // Must read the server's authoritative copy, not the local
+                        // cache — a stale/empty cached read here (e.g. renaming a
+                        // class this device hasn't actively synced) would make us
+                        // copy blank data to the new name and then permanently
+                        // delete the real old document below.
+                        const snap = await oldRef.get({ source: 'server' });
                         const oldData = snap.exists ? snap.data() : DEFAULT_DATA;
                         await db.collection('classes').doc(newCode).set(oldData);
                         await oldRef.delete();
@@ -2769,7 +2799,12 @@ service cloud.firestore {
                     try {
                         let base = DEFAULT_DATA;
                         if (db) {
-                            const snap = await db.collection('classes').doc(code).get();
+                            // Must read from the server, not the local cache — a stale
+                            // or empty cached read here (e.g. this device has never
+                            // opened that class before) would make `base` look emptier
+                            // than it really is, and the .set() below would then
+                            // permanently overwrite that class's real cloud data.
+                            const snap = await db.collection('classes').doc(code).get({ source: 'server' });
                             if (snap.exists) base = { ...DEFAULT_DATA, ...snap.data() };
                         } else {
                             const raw = localStorage.getItem(`sga_data_${code}`);
@@ -2821,7 +2856,10 @@ service cloud.firestore {
                     try {
                         let base = DEFAULT_DATA;
                         if (db) {
-                            const snap = await db.collection('classes').doc(code).get();
+                            // Same reasoning as bulkCreateClasses: read the server's
+                            // authoritative copy, never the local cache, before this
+                            // merges and overwrites the whole document.
+                            const snap = await db.collection('classes').doc(code).get({ source: 'server' });
                             if (snap.exists) base = { ...DEFAULT_DATA, ...snap.data() };
                         } else {
                             const raw = localStorage.getItem(`sga_data_${code}`);
