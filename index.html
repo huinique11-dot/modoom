@@ -2057,6 +2057,47 @@
             return [...list, { id: uid(), lesson, content, detail: detail || '', updatedAt: Date.now() }];
         }
 
+        // Detects the case where a device already has real roster data sitting in
+        // its own localStorage (recorded before this device ever connected to the
+        // cloud copy of this class) that doesn't match what the cloud already has —
+        // e.g. two devices each independently accumulated their own offline roster
+        // under the same class code before either connected Firebase. Silently
+        // adopting the cloud copy in that situation would discard this device's
+        // roster with no way back, so this only flags it; the caller decides.
+        function rostersDiverge(localData, cloudData) {
+            const localStudents = (localData && localData.students) || [];
+            if (!localStudents.length) return false;
+            const cloudStudents = (cloudData && cloudData.students) || [];
+            if (localStudents.length !== cloudStudents.length) return true;
+            const cloudNames = new Set(cloudStudents.map(s => s.name));
+            return localStudents.some(s => !cloudNames.has(s.name));
+        }
+
+        function SyncConflictModal({ localCount, cloudCount, localNames, cloudNames, onUseCloud, onUseLocal }) {
+            return (
+                <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl max-w-md w-full max-h-[85vh] overflow-y-auto p-5 sm:p-6">
+                        <h3 className="font-bold text-lg text-slate-900 mb-2">⚠️ 학급 데이터가 서로 달라요</h3>
+                        <p className="text-xs text-slate-500 mb-4">이 기기에 저장돼 있던 데이터와 클라우드(다른 기기에서 동기화된 데이터)가 서로 달라요. 두 기기에서 따로따로 기록하다가 나중에 연결했을 때 생길 수 있는 상황이에요. 어느 쪽을 쓸지 골라주세요 — 고르지 않은 쪽은 화면에서 사라지지만, 이 기기의 브라우저에 남아있는 동안은 완전히 지워지진 않아요.</p>
+                        <div className="grid grid-cols-2 gap-2 mb-4">
+                            <div className="border border-slate-200 rounded-xl p-3">
+                                <p className="text-xs font-bold text-slate-700 mb-1">📱 이 기기 ({localCount}명)</p>
+                                <p className="text-[11px] text-slate-500 break-words">{localNames.slice(0, 8).join(', ')}{localNames.length > 8 ? ' 외' : ''}</p>
+                            </div>
+                            <div className="border border-slate-200 rounded-xl p-3">
+                                <p className="text-xs font-bold text-slate-700 mb-1">☁️ 클라우드 ({cloudCount}명)</p>
+                                <p className="text-[11px] text-slate-500 break-words">{cloudNames.slice(0, 8).join(', ')}{cloudNames.length > 8 ? ' 외' : ''}</p>
+                            </div>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                            <button onClick={onUseCloud} className="w-full bg-indigo-600 text-white text-sm font-bold px-4 py-2.5 rounded-lg hover:bg-indigo-700">☁️ 클라우드 데이터 사용하기</button>
+                            <button onClick={onUseLocal} className="w-full bg-white border border-slate-300 text-slate-700 text-sm font-bold px-4 py-2.5 rounded-lg hover:bg-slate-50">📱 이 기기 데이터 사용하기 (클라우드를 덮어씀)</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
         function ProgressTab({ data, updateData, classCode, classCodes, fetchAllProgress, applyLessonToAllClasses }) {
             const [mode, setMode] = useState('mine');
             const [form, setForm] = useState({ lesson: '', content: '' });
@@ -2524,6 +2565,7 @@ service cloud.firestore {
             // updateData and the exists-branch below, which replays this queue on
             // top of the freshly loaded data as soon as it arrives.
             const pendingUpdatesRef = useRef([]);
+            const [syncConflict, setSyncConflict] = useState(null);
             const [activeTab, setActiveTab] = useState('record');
             const [focusGroupId, setFocusGroupId] = useState(null);
             const [showHelp, setShowHelp] = useState(false);
@@ -2588,10 +2630,41 @@ service cloud.firestore {
             useEffect(() => {
                 if (!db || !classCode) return;
                 let cancelled = false;
+                let firstLoadHandled = false;
                 setData(DEFAULT_DATA);
                 setDataReady(false);
+                setSyncConflict(null);
                 pendingUpdatesRef.current = [];
                 const docRef = db.collection('classes').doc(classCode);
+                let localSnapshot = null;
+                try {
+                    const raw = localStorage.getItem(`sga_data_${classCode}`);
+                    localSnapshot = raw ? { ...DEFAULT_DATA, ...JSON.parse(raw) } : null;
+                } catch (e) { localSnapshot = null; }
+
+                const finishLoad = (merged) => {
+                    if (cancelled) return;
+                    if (pendingUpdatesRef.current.length) {
+                        // Replay edits the teacher made while this class's data was
+                        // still loading (or while the conflict prompt below was
+                        // waiting for an answer), on top of the now-authoritative
+                        // data, then push the result back up — instead of letting
+                        // it get silently overwritten.
+                        merged = pendingUpdatesRef.current.reduce(
+                            (acc, updater) => (typeof updater === 'function' ? updater(acc) : updater),
+                            merged
+                        );
+                        pendingUpdatesRef.current = [];
+                        try {
+                            const safe = JSON.parse(JSON.stringify(merged));
+                            docRef.set(safe).catch(err => console.error('pending sync replay failed', err));
+                        } catch (err) { console.error('pending sync replay failed', err); }
+                    }
+                    setData(merged);
+                    setDataReady(true);
+                    setSyncConflict(null);
+                };
+
                 // One-time, server-authoritative check: only seed the cloud doc from
                 // this device's localStorage if the class genuinely has no cloud copy
                 // yet. This must NEVER happen inside the onSnapshot listener below —
@@ -2603,8 +2676,7 @@ service cloud.firestore {
                 // trusted when it actually reached Firestore.
                 docRef.get({ source: 'server' }).then(snap => {
                     if (cancelled || snap.exists) return;
-                    const raw = localStorage.getItem(`sga_data_${classCode}`);
-                    const seed = raw ? { ...DEFAULT_DATA, ...JSON.parse(raw) } : DEFAULT_DATA;
+                    const seed = localSnapshot || DEFAULT_DATA;
                     docRef.set(seed).catch(err => console.error('initial sync seed failed', err));
                 }).catch(err => console.error('server existence check failed', err));
                 const unsub = docRef.onSnapshot(
@@ -2618,24 +2690,35 @@ service cloud.firestore {
                         // to be treated as "loaded" and let updateData below sync a
                         // blank document over real cloud data.
                         if (snap.exists) {
-                            let merged = { ...DEFAULT_DATA, ...snap.data() };
-                            if (pendingUpdatesRef.current.length) {
-                                // Replay edits the teacher made while this class's data
-                                // was still loading, on top of the now-authoritative
-                                // server data, then push the result back up — instead
-                                // of letting this snapshot silently overwrite them.
-                                merged = pendingUpdatesRef.current.reduce(
-                                    (acc, updater) => (typeof updater === 'function' ? updater(acc) : updater),
-                                    merged
-                                );
-                                pendingUpdatesRef.current = [];
-                                try {
-                                    const safe = JSON.parse(JSON.stringify(merged));
-                                    docRef.set(safe).catch(err => console.error('pending sync replay failed', err));
-                                } catch (err) { console.error('pending sync replay failed', err); }
+                            const cloudMerged = { ...DEFAULT_DATA, ...snap.data() };
+                            if (!firstLoadHandled) {
+                                firstLoadHandled = true;
+                                // This device already had its own roster saved locally
+                                // (from before it ever connected to this class's cloud
+                                // copy) that doesn't match what the cloud has — e.g. two
+                                // devices each recorded their own offline roster under
+                                // the same class code before either connected. Silently
+                                // adopting the cloud copy here would discard this
+                                // device's roster for good, so ask instead of guessing.
+                                if (localSnapshot && rostersDiverge(localSnapshot, cloudMerged)) {
+                                    setSyncConflict({
+                                        localCount: localSnapshot.students.length,
+                                        cloudCount: (cloudMerged.students || []).length,
+                                        localNames: localSnapshot.students.map(s => s.name),
+                                        cloudNames: (cloudMerged.students || []).map(s => s.name),
+                                        onUseCloud: () => finishLoad(cloudMerged),
+                                        onUseLocal: () => {
+                                            try {
+                                                const safe = JSON.parse(JSON.stringify(localSnapshot));
+                                                docRef.set(safe).catch(err => console.error('conflict resolve (use local) failed', err));
+                                            } catch (err) { console.error('conflict resolve (use local) failed', err); }
+                                            finishLoad(localSnapshot);
+                                        },
+                                    });
+                                    return;
+                                }
                             }
-                            setData(merged);
-                            setDataReady(true);
+                            finishLoad(cloudMerged);
                         }
                     },
                     err => {
@@ -2926,6 +3009,8 @@ service cloud.firestore {
                             isStandalone={isStandalone} isIOS={isIOS}
                             installPrompt={installPrompt} onInstall={triggerInstall} />
                     )}
+
+                    {syncConflict && <SyncConflictModal {...syncConflict} />}
 
                     <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 pb-24 sm:pb-6">
                         <div className="hidden sm:flex border-b border-slate-200 mb-6 overflow-x-auto whitespace-nowrap">
