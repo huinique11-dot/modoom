@@ -2664,6 +2664,11 @@ service cloud.firestore {
                     localSnapshot = raw ? { ...DEFAULT_DATA, ...JSON.parse(raw) } : null;
                 } catch (e) { localSnapshot = null; }
 
+                const reportSyncFailure = (context, err) => {
+                    console.error(context, err);
+                    setSyncError(`저장 중 오류가 발생했습니다 (${context}): ${err.message} — 방금 입력한 내용이 클라우드에 저장되지 않았을 수 있어요.`);
+                };
+
                 const finishLoad = (merged) => {
                     if (cancelled) return;
                     if (pendingUpdatesRef.current.length) {
@@ -2679,8 +2684,8 @@ service cloud.firestore {
                         pendingUpdatesRef.current = [];
                         try {
                             const safe = JSON.parse(JSON.stringify(merged));
-                            docRef.set(safe).catch(err => console.error('pending sync replay failed', err));
-                        } catch (err) { console.error('pending sync replay failed', err); }
+                            docRef.set(safe).catch(err => reportSyncFailure('pending sync replay failed', err));
+                        } catch (err) { reportSyncFailure('pending sync replay failed', err); }
                     }
                     setData(merged);
                     setDataReady(true);
@@ -2699,7 +2704,7 @@ service cloud.firestore {
                 docRef.get({ source: 'server' }).then(snap => {
                     if (cancelled || snap.exists) return;
                     const seed = localSnapshot || DEFAULT_DATA;
-                    docRef.set(seed).catch(err => console.error('initial sync seed failed', err));
+                    docRef.set(seed).catch(err => reportSyncFailure('initial sync seed failed', err));
                 }).catch(err => console.error('server existence check failed', err));
                 const unsub = docRef.onSnapshot(
                     snap => {
@@ -2732,8 +2737,8 @@ service cloud.firestore {
                                         onUseLocal: () => {
                                             try {
                                                 const safe = JSON.parse(JSON.stringify(localSnapshot));
-                                                docRef.set(safe).catch(err => console.error('conflict resolve (use local) failed', err));
-                                            } catch (err) { console.error('conflict resolve (use local) failed', err); }
+                                                docRef.set(safe).catch(err => reportSyncFailure('conflict resolve (use local) failed', err));
+                                            } catch (err) { reportSyncFailure('conflict resolve (use local) failed', err); }
                                             finishLoad(localSnapshot);
                                         },
                                     });
@@ -2750,7 +2755,24 @@ service cloud.firestore {
                         setSyncError('동기화 실패: ' + err.message + ' — Firestore Database를 만들었는지, 보안 규칙을 게시했는지 확인하세요.');
                     }
                 );
-                return () => { cancelled = true; unsub(); };
+                return () => {
+                    cancelled = true;
+                    unsub();
+                    // If the teacher switched away from this class (or its Firebase
+                    // connection changed) before its data ever finished loading,
+                    // any edit they made in that window is still sitting queued
+                    // here — flush it to THIS class's document now, instead of
+                    // silently dropping it when the ref below gets reset for
+                    // whatever class comes next.
+                    if (pendingUpdatesRef.current.length) {
+                        const queued = pendingUpdatesRef.current;
+                        pendingUpdatesRef.current = [];
+                        transactionalWrite(docRef, current => queued.reduce(
+                            (acc, u) => (typeof u === 'function' ? u(acc) : u),
+                            current
+                        )).catch(err => reportSyncFailure('pending sync flush-on-switch failed', err));
+                    }
+                };
             }, [db, classCode]);
 
             useEffect(() => {
@@ -2781,7 +2803,16 @@ service cloud.firestore {
                         // (via its own JSON round-trip), so a slip elsewhere never
                         // crashes the app.
                         transactionalWrite(db.collection('classes').doc(classCode), updater)
-                            .catch(err => console.error('sync write failed', err));
+                            .then(() => setSyncError(''))
+                            .catch(err => {
+                                console.error('sync write failed', err);
+                                // A write that fails here leaves this device showing the
+                                // edit locally while the cloud never actually received
+                                // it — surface that instead of failing silently, since
+                                // otherwise it looks exactly like the edit was saved
+                                // right up until it "disappears" later on any device.
+                                setSyncError('저장 중 오류가 발생했습니다: ' + err.message + ' — 방금 입력한 내용이 클라우드에 저장되지 않았을 수 있어요.');
+                            });
                     } else {
                         localStorage.setItem(`sga_data_${classCode}`, JSON.stringify(next));
                     }
