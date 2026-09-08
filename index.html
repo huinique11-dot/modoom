@@ -2064,6 +2064,28 @@
         // under the same class code before either connected Firebase. Silently
         // adopting the cloud copy in that situation would discard this device's
         // roster with no way back, so this only flags it; the caller decides.
+        // Writes to Firestore by re-reading the CURRENT server document inside a
+        // transaction and applying `updater` to that fresh copy — never to
+        // whatever this device's local state happened to be. Plain `.set(next)`
+        // (this app's original approach) computes `next` from this device's own
+        // local state and blindly overwrites the whole document; if another
+        // device/tab wrote a change in between, that change is silently lost the
+        // instant this device's write lands, and — since every field lives in one
+        // document — losing an update means the DOCUMENT reverts to look like
+        // that field/entry never got added, even though nothing here touched it
+        // directly. Firestore automatically retries a transaction if the document
+        // changed since it read, so both edits survive either way.
+        async function transactionalWrite(docRef, updater) {
+            const db = docRef.firestore;
+            await db.runTransaction(async (tx) => {
+                const snap = await tx.get(docRef);
+                const current = snap.exists ? { ...DEFAULT_DATA, ...snap.data() } : DEFAULT_DATA;
+                const next = typeof updater === 'function' ? updater(current) : updater;
+                const safe = JSON.parse(JSON.stringify(next));
+                tx.set(docRef, safe);
+            });
+        }
+
         function rostersDiverge(localData, cloudData) {
             const localStudents = (localData && localData.students) || [];
             if (!localStudents.length) return false;
@@ -2752,15 +2774,14 @@ service cloud.firestore {
                             pendingUpdatesRef.current.push(updater);
                             return next;
                         }
-                        try {
-                            // Firestore's SDK throws synchronously (not just a rejected
-                            // promise) on a field value of `undefined`. A JSON round-trip
-                            // drops those keys, so a slip elsewhere never crashes the app.
-                            const safe = JSON.parse(JSON.stringify(next));
-                            db.collection('classes').doc(classCode).set(safe).catch(err => console.error('sync write failed', err));
-                        } catch (err) {
-                            console.error('sync write failed', err);
-                        }
+                        // transactionalWrite re-applies `updater` to the server's
+                        // current copy rather than sending this device's own `next`
+                        // — see its comment for why that matters. It also absorbs
+                        // Firestore's synchronous throw on an `undefined` field value
+                        // (via its own JSON round-trip), so a slip elsewhere never
+                        // crashes the app.
+                        transactionalWrite(db.collection('classes').doc(classCode), updater)
+                            .catch(err => console.error('sync write failed', err));
                     } else {
                         localStorage.setItem(`sga_data_${classCode}`, JSON.stringify(next));
                     }
@@ -2807,15 +2828,19 @@ service cloud.firestore {
                 try {
                     if (db) {
                         const oldRef = db.collection('classes').doc(oldCode);
-                        // Must read the server's authoritative copy, not the local
-                        // cache — a stale/empty cached read here (e.g. renaming a
-                        // class this device hasn't actively synced) would make us
-                        // copy blank data to the new name and then permanently
-                        // delete the real old document below.
-                        const snap = await oldRef.get({ source: 'server' });
-                        const oldData = snap.exists ? snap.data() : DEFAULT_DATA;
-                        await db.collection('classes').doc(newCode).set(oldData);
-                        await oldRef.delete();
+                        const newRef = db.collection('classes').doc(newCode);
+                        // A transaction, not a plain read-then-write: if another
+                        // device writes to the old document between the read and
+                        // the delete below, a plain get()+set()+delete() would
+                        // copy a stale snapshot to the new name and then destroy
+                        // the real (newer) old document. The transaction detects
+                        // that and retries with a fresh read instead.
+                        await db.runTransaction(async (tx) => {
+                            const snap = await tx.get(oldRef);
+                            const oldData = snap.exists ? snap.data() : DEFAULT_DATA;
+                            tx.set(newRef, oldData);
+                            tx.delete(oldRef);
+                        });
                     } else {
                         const raw = localStorage.getItem(`sga_data_${oldCode}`);
                         if (raw) {
@@ -2880,22 +2905,24 @@ service cloud.firestore {
                         continue;
                     }
                     try {
-                        let base = DEFAULT_DATA;
+                        let addedCount = 0;
                         if (db) {
-                            // Must read from the server, not the local cache — a stale
-                            // or empty cached read here (e.g. this device has never
-                            // opened that class before) would make `base` look emptier
-                            // than it really is, and the .set() below would then
-                            // permanently overwrite that class's real cloud data.
-                            const snap = await db.collection('classes').doc(code).get({ source: 'server' });
-                            if (snap.exists) base = { ...DEFAULT_DATA, ...snap.data() };
+                            // A transaction, not a read-then-write: it re-reads this
+                            // class's current cloud data at commit time, so a change
+                            // from another device in between never gets silently
+                            // dropped by this merge.
+                            await transactionalWrite(db.collection('classes').doc(code), base => {
+                                const { next, addedCount: n } = mergeClassImport(base, imported);
+                                addedCount = n;
+                                return next;
+                            });
                         } else {
                             const raw = localStorage.getItem(`sga_data_${code}`);
-                            if (raw) base = { ...DEFAULT_DATA, ...JSON.parse(raw) };
+                            const base = raw ? { ...DEFAULT_DATA, ...JSON.parse(raw) } : DEFAULT_DATA;
+                            const { next, addedCount: n } = mergeClassImport(base, imported);
+                            addedCount = n;
+                            localStorage.setItem(`sga_data_${code}`, JSON.stringify(next));
                         }
-                        const { next, addedCount } = mergeClassImport(base, imported);
-                        if (db) await db.collection('classes').doc(code).set(next);
-                        else localStorage.setItem(`sga_data_${code}`, JSON.stringify(next));
                         summary.push({ code, count: addedCount });
                     } catch (e) {
                         summary.push({ code, count: 0, error: e.message });
@@ -2937,20 +2964,21 @@ service cloud.firestore {
                         continue;
                     }
                     try {
-                        let base = DEFAULT_DATA;
                         if (db) {
-                            // Same reasoning as bulkCreateClasses: read the server's
-                            // authoritative copy, never the local cache, before this
-                            // merges and overwrites the whole document.
-                            const snap = await db.collection('classes').doc(code).get({ source: 'server' });
-                            if (snap.exists) base = { ...DEFAULT_DATA, ...snap.data() };
+                            // A transaction, not a read-then-write: it re-reads this
+                            // class's current cloud data at commit time, so a change
+                            // from another device in between never gets silently
+                            // dropped by this merge.
+                            await transactionalWrite(db.collection('classes').doc(code), base => ({
+                                ...base,
+                                progress: upsertLesson(base.progress || [], lesson, content, detail),
+                            }));
                         } else {
                             const raw = localStorage.getItem(`sga_data_${code}`);
-                            if (raw) base = { ...DEFAULT_DATA, ...JSON.parse(raw) };
+                            const base = raw ? { ...DEFAULT_DATA, ...JSON.parse(raw) } : DEFAULT_DATA;
+                            const next = { ...base, progress: upsertLesson(base.progress || [], lesson, content, detail) };
+                            localStorage.setItem(`sga_data_${code}`, JSON.stringify(next));
                         }
-                        const next = { ...base, progress: upsertLesson(base.progress || [], lesson, content, detail) };
-                        if (db) await db.collection('classes').doc(code).set(next);
-                        else localStorage.setItem(`sga_data_${code}`, JSON.stringify(next));
                         count++;
                     } catch (e) {
                         console.error('apply progress failed for', code, e);
