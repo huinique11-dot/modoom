@@ -362,6 +362,16 @@
         };
         const SUBJECTS = Object.keys(SUBJECT_ACTIVITY_GROUPS);
 
+        const TIMETABLE_DAYS = ['월', '화', '수', '목', '금'];
+        const TIMETABLE_PERIODS = [1, 2, 3, 4, 5, 6, 7];
+        // Sorts timetable slot strings like "화3" into weekday-then-period order,
+        // regardless of the order they were toggled on in.
+        const sortTimetableSlots = (slots) => [...slots].sort((a, b) => {
+            const dayDiff = TIMETABLE_DAYS.indexOf(a[0]) - TIMETABLE_DAYS.indexOf(b[0]);
+            if (dayDiff !== 0) return dayDiff;
+            return parseInt(a.slice(1), 10) - parseInt(b.slice(1), 10);
+        });
+
         const BASE_KEYWORD_GROUPS = [
             { category: '수업 활동', tags: ['개념 이해', '탐구·질문', '실습·실기', '경기·시합', '발표', '토의·토론', '실험', '프로젝트', '자료 조사', '문제 해결', '창의적 산출', '꾸준함', '심화 학습', '적용·응용', '자기·동료평가', '포트폴리오'] },
             { category: '교과 역량', tags: ['자기주도 학습', '협업·소통', '창의적 사고', '비판적 사고', '문제해결력', '정보 활용', '발표·표현력', '탐구 지속성', '실생활 연결', '자기 점검(메타인지)'] },
@@ -2221,14 +2231,19 @@
 
             return (
                 <div>
-                    <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-                        <h3 className="text-lg font-bold text-slate-900">
-                            <InlineEditText value={data.progressTitle || '진도 기록'} onChange={v => updateData(prev => ({ ...prev, progressTitle: v.trim() || '진도 기록' }))} />
-                        </h3>
-                        <div className="flex bg-slate-100 rounded-lg p-1 text-xs font-medium">
-                            <button onClick={() => setMode('mine')} className={`px-3 py-1.5 rounded-md ${mode === 'mine' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>이 학급 진도</button>
-                            <button onClick={() => setMode('compare')} className={`px-3 py-1.5 rounded-md ${mode === 'compare' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>전체 학급 비교</button>
+                    <div className="mb-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <h3 className="text-lg font-bold text-slate-900">
+                                <InlineEditText value={data.progressTitle || '진도 기록'} onChange={v => updateData(prev => ({ ...prev, progressTitle: v.trim() || '진도 기록' }))} />
+                            </h3>
+                            <div className="flex bg-slate-100 rounded-lg p-1 text-xs font-medium">
+                                <button onClick={() => setMode('mine')} className={`px-3 py-1.5 rounded-md ${mode === 'mine' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>이 학급 진도</button>
+                                <button onClick={() => setMode('compare')} className={`px-3 py-1.5 rounded-md ${mode === 'compare' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>전체 학급 비교</button>
+                            </div>
                         </div>
+                        {(data.timetable || []).length > 0 && (
+                            <p className="text-xs text-slate-400 mt-1">🗓️ {sortTimetableSlots(data.timetable).map(s => `${s[0]} ${s.slice(1)}교시`).join(' · ')} (설정 탭에서 수정)</p>
+                        )}
                     </div>
 
                     {mode === 'mine' ? (
@@ -2307,8 +2322,13 @@
                                                     {allLessons.map(lesson => {
                                                         const entry = (compareData[code] || []).find(p => p.lesson === lesson);
                                                         return (
-                                                            <td key={lesson} className="px-3 py-2 max-w-[14rem] truncate text-slate-600" title={entry ? entry.content : ''}>
-                                                                {entry ? (entry.content || <span className="text-slate-300">(내용 없음)</span>) : <span className="text-slate-200">—</span>}
+                                                            <td key={lesson} className="px-3 py-2 max-w-[14rem] text-slate-600" title={entry ? entry.content : ''}>
+                                                                {entry ? (
+                                                                    <div>
+                                                                        {entry.date && <div className="text-[10px] text-slate-400 whitespace-nowrap">{entry.date}</div>}
+                                                                        <div className="truncate">{entry.content || <span className="text-slate-300">(내용 없음)</span>}</div>
+                                                                    </div>
+                                                                ) : <span className="text-slate-200">—</span>}
                                                             </td>
                                                         );
                                                     })}
@@ -2418,6 +2438,49 @@ service cloud.firestore {
                                 </button>
                             ))}
                         </div>
+                    </section>
+
+                    <section>
+                        <h3 className="text-lg font-bold text-slate-900 mb-2">🗓️ 이 학급 시간표</h3>
+                        <p className="text-xs text-slate-500 mb-3">이 학급을 만나는 요일·교시를 표시해두면, 진도기록 화면 위에 참고용으로 보여줘요. 학급마다 따로 설정할 수 있어요.</p>
+                        <div className="overflow-x-auto">
+                            <table className="text-xs border-collapse">
+                                <thead>
+                                    <tr>
+                                        <th className="w-10"></th>
+                                        {TIMETABLE_DAYS.map(d => <th key={d} className="px-2 py-1 font-bold text-slate-500">{d}</th>)}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {TIMETABLE_PERIODS.map(period => (
+                                        <tr key={period}>
+                                            <td className="px-2 py-1 text-right font-bold text-slate-400">{period}</td>
+                                            {TIMETABLE_DAYS.map(day => {
+                                                const slot = `${day}${period}`;
+                                                const on = (data.timetable || []).includes(slot);
+                                                return (
+                                                    <td key={day} className="p-0.5">
+                                                        <button
+                                                            onClick={() => updateData(prev => {
+                                                                const cur = prev.timetable || [];
+                                                                return { ...prev, timetable: cur.includes(slot) ? cur.filter(s => s !== slot) : [...cur, slot] };
+                                                            })}
+                                                            className={`w-9 h-8 rounded-lg border font-bold ${on ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-300 hover:border-indigo-300'}`}>
+                                                            {on ? '●' : ''}
+                                                        </button>
+                                                    </td>
+                                                );
+                                            })}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                        {(data.timetable || []).length > 0 && (
+                            <p className="text-xs text-slate-500 mt-2">
+                                📌 {sortTimetableSlots(data.timetable).map(s => `${s[0]} ${s.slice(1)}교시`).join(' · ')}
+                            </p>
+                        )}
                     </section>
 
                     <section>
