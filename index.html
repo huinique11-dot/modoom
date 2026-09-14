@@ -376,6 +376,29 @@
             return parseInt(a.slice(1), 10) - parseInt(b.slice(1), 10);
         });
 
+        // Date-range helpers for bulk-generating a semester's worth of lessons
+        // from a class's timetable. Everything is computed in UTC using the
+        // "YYYY-MM-DD" string as the sole source of truth, so local timezone
+        // offsets can never shift a date by a day.
+        function parseDateStr(s) {
+            const [y, m, d] = s.split('-').map(Number);
+            return new Date(Date.UTC(y, m - 1, d));
+        }
+        function formatDateStr(date) { return date.toISOString().slice(0, 10); }
+        function eachDateInRange(startStr, endStr) {
+            const dates = [];
+            let cur = parseDateStr(startStr);
+            const end = parseDateStr(endStr);
+            while (cur <= end) {
+                dates.push(formatDateStr(cur));
+                cur = new Date(cur.getTime() + 86400000);
+            }
+            return dates;
+        }
+        const KOREAN_WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+        const weekdayKorean = (dateStr) => KOREAN_WEEKDAYS[parseDateStr(dateStr).getUTCDay()];
+        const isNoSchoolDate = (dateStr, ranges) => (ranges || []).some(r => dateStr >= r.start && dateStr <= r.end);
+
         const BASE_KEYWORD_GROUPS = [
             { category: '수업 활동', tags: ['개념 이해', '탐구·질문', '실습·실기', '경기·시합', '발표', '토의·토론', '실험', '프로젝트', '자료 조사', '문제 해결', '창의적 산출', '꾸준함', '심화 학습', '적용·응용', '자기·동료평가', '포트폴리오'] },
             { category: '교과 역량', tags: ['자기주도 학습', '협업·소통', '창의적 사고', '비판적 사고', '문제해결력', '정보 활용', '발표·표현력', '탐구 지속성', '실생활 연결', '자기 점검(메타인지)'] },
@@ -2159,7 +2182,7 @@
             );
         }
 
-        function ProgressTab({ data, updateData, classCode, classCodes, fetchAllProgress, applyLessonToAllClasses, timetable }) {
+        function ProgressTab({ data, updateData, classCode, classCodes, fetchAllProgress, applyLessonToAllClasses, timetable, noSchoolDates }) {
             const [mode, setMode] = useState('mine');
             const [form, setForm] = useState({ lesson: '', content: '', date: todayStr() });
             const [editingId, setEditingId] = useState(null);
@@ -2202,6 +2225,50 @@
                 const count = await applyLessonToAllClasses({ lesson: p.lesson, content: p.content, detail: p.detail, date: p.date });
                 setApplyMsg(`${count}개 학급에 적용했습니다.`);
                 setTimeout(() => setApplyMsg(''), 3000);
+            };
+
+            const [genForm, setGenForm] = useState({ start: todayStr(), end: todayStr() });
+            const [genMsg, setGenMsg] = useState('');
+            const generateLessons = () => {
+                const mySlotDays = new Set(Object.keys(timetable || {}).filter(s => timetable[s] === classCode).map(s => s[0]));
+                if (!mySlotDays.size) { setGenMsg('먼저 설정 탭에서 이 학급의 시간표를 정해주세요.'); return; }
+                if (!genForm.start || !genForm.end || genForm.start > genForm.end) { setGenMsg('시작일과 종료일을 확인해주세요.'); return; }
+
+                const existingDates = new Set(progress.map(p => p.date).filter(Boolean));
+                const maxLesson = progress.reduce((max, p) => {
+                    const n = parseFloat(p.lesson);
+                    return (!isNaN(n) && Number.isInteger(n) && n > max) ? n : max;
+                }, 0);
+
+                const candidateDates = eachDateInRange(genForm.start, genForm.end)
+                    .filter(d => mySlotDays.has(weekdayKorean(d)))
+                    .filter(d => !isNoSchoolDate(d, noSchoolDates))
+                    .filter(d => !existingDates.has(d)); // skip days already recorded — safe to re-run for an extended range
+
+                if (!candidateDates.length) { setGenMsg('새로 만들 차시가 없어요 (이미 다 있거나, 조건에 맞는 날이 없어요).'); return; }
+
+                const newEntries = candidateDates.map((d, i) => ({
+                    id: uid(), lesson: String(maxLesson + i + 1), content: '', detail: '', date: d, updatedAt: Date.now(),
+                }));
+                updateData(prev => ({ ...prev, progress: [...(prev.progress || []), ...newEntries] }));
+                setGenMsg(`${newEntries.length}개 차시를 만들었어요 (${candidateDates[0]} ~ ${candidateDates[candidateDates.length - 1]}). 내용은 비어있으니 하나씩 채우거나 수정하면 돼요.`);
+            };
+
+            const [bulkForm, setBulkForm] = useState({ lesson: '', date: todayStr(), content: '' });
+            const [bulkBusy, setBulkBusy] = useState(false);
+            const applyBulk = async () => {
+                if (!bulkForm.lesson.trim() || !bulkForm.content.trim()) return;
+                setBulkBusy(true);
+                const count = await applyLessonToAllClasses({ lesson: bulkForm.lesson.trim(), content: bulkForm.content.trim(), date: bulkForm.date });
+                setBulkBusy(false);
+                setApplyMsg(`${count}개 학급에 일괄 적용했습니다.`);
+                setTimeout(() => setApplyMsg(''), 3000);
+                setBulkForm({ lesson: '', date: todayStr(), content: '' });
+                // The date this same lesson carries in any individual class (edited
+                // from that class's own "이 학급 진도" screen) lives in that class's
+                // own progress entry — this snapshot re-fetch is what brings such
+                // edits into view here.
+                loadCompare();
             };
 
             const openDetail = (p) => {
@@ -2255,6 +2322,19 @@
 
                     {mode === 'mine' ? (
                         <div>
+                            <details className="border border-slate-200 rounded-xl p-3 mb-4 bg-indigo-50/40">
+                                <summary className="text-xs font-bold text-indigo-700 cursor-pointer select-none">📅 학기 진도 한번에 만들기 (시간표 기준)</summary>
+                                <div className="mt-2 space-y-2">
+                                    <p className="text-[11px] text-slate-500">이 학급의 시간표와 수업 없는 날(둘 다 설정 탭)을 기준으로, 정해준 기간 동안의 차시를 순서대로 만들어요. 내용은 비어있는 채로 만들어지니 나중에 하나씩 채우거나 수정하면 돼요.</p>
+                                    <div className="flex flex-wrap gap-2 items-center">
+                                        <input type="date" value={genForm.start} onChange={e => setGenForm({ ...genForm, start: e.target.value })} className="border rounded-lg px-2 py-1.5 text-sm" />
+                                        <span className="text-xs text-slate-400">~</span>
+                                        <input type="date" value={genForm.end} onChange={e => setGenForm({ ...genForm, end: e.target.value })} className="border rounded-lg px-2 py-1.5 text-sm" />
+                                        <button type="button" onClick={generateLessons} className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold hover:bg-indigo-700">차시 자동 생성</button>
+                                    </div>
+                                    {genMsg && <p className="text-xs text-slate-600">{genMsg}</p>}
+                                </div>
+                            </details>
                             <form onSubmit={submit} className="border border-slate-200 rounded-xl p-3 mb-4 bg-slate-50">
                                 <div className="flex flex-col sm:flex-row gap-2 mb-2">
                                     <div className="flex items-center border rounded-lg sm:w-32 shrink-0 overflow-hidden">
@@ -2307,6 +2387,23 @@
                         </div>
                     ) : (
                         <div>
+                            <div className="border border-slate-200 rounded-xl p-3 mb-3 bg-slate-50">
+                                <p className="text-xs font-bold text-slate-600 mb-2">📢 차시 하나를 골라 모든 학급에 한번에 입력하기</p>
+                                <div className="flex flex-col sm:flex-row gap-2 mb-2">
+                                    <div className="flex items-center border rounded-lg sm:w-28 shrink-0 overflow-hidden bg-white">
+                                        <button type="button" onClick={() => setBulkForm(f => ({ ...f, lesson: String((parseInt(f.lesson, 10) || 0) - 1) }))} className="px-2.5 py-2 text-slate-500 font-bold hover:bg-slate-100 border-r">−</button>
+                                        <input value={bulkForm.lesson} onChange={e => setBulkForm({ ...bulkForm, lesson: e.target.value })} placeholder="차시" className="flex-1 min-w-0 text-center px-1 py-2 text-sm outline-none" />
+                                        <button type="button" onClick={() => setBulkForm(f => ({ ...f, lesson: String((parseInt(f.lesson, 10) || 0) + 1) }))} className="px-2.5 py-2 text-slate-500 font-bold hover:bg-slate-100 border-l">＋</button>
+                                    </div>
+                                    <input type="date" value={bulkForm.date} onChange={e => setBulkForm({ ...bulkForm, date: e.target.value })} className="border rounded-lg px-2 py-2 text-sm sm:w-36 shrink-0 bg-white" />
+                                    <input value={bulkForm.content} onChange={e => setBulkForm({ ...bulkForm, content: e.target.value })} placeholder="모든 학급에 넣을 진도/활동 내용" className="flex-1 border rounded-lg px-3 py-2 text-sm bg-white" />
+                                </div>
+                                <div className="flex justify-end">
+                                    <button onClick={applyBulk} disabled={bulkBusy || !bulkForm.lesson.trim() || !bulkForm.content.trim()} className="text-xs bg-indigo-600 text-white px-4 py-1.5 rounded-lg font-bold hover:bg-indigo-700 disabled:opacity-50">{bulkBusy ? '적용 중...' : '모든 학급에 적용'}</button>
+                                </div>
+                                <p className="text-[11px] text-slate-400 mt-1">이미 그 차시 내용이 있는 학급은 이 내용으로 덮어써져요. 각 학급에 남긴 세부 메모(📝)는 그대로 남습니다.</p>
+                            </div>
+                            {applyMsg && <p className="text-xs text-emerald-600 mb-2">{applyMsg}</p>}
                             <div className="flex items-center justify-between mb-2 gap-2">
                                 <p className="text-xs text-slate-500">저장된 시점의 스냅샷이에요. 최신 내용을 보려면 새로고침하세요.</p>
                                 <button onClick={loadCompare} disabled={loadingCompare} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 font-bold text-indigo-600 hover:bg-indigo-50 shrink-0">{loadingCompare ? '불러오는 중...' : '↻ 새로고침'}</button>
@@ -2357,7 +2454,36 @@
         // ---------------------------------------------------------------
         // Settings tab
         // ---------------------------------------------------------------
-        function SettingsTab({ classCode, classCodes, firebaseConfigText, setFirebaseConfigText, applyFirebaseConfig, connected, syncError, googleClientId, setGoogleClientId, google, data, updateData, timetable, setTimetableSlot }) {
+        function NoSchoolDatesEditor({ dates, onAdd, onRemove }) {
+            const [form, setForm] = useState({ start: todayStr(), end: todayStr(), label: '' });
+            const add = () => {
+                if (!form.start || !form.end || form.start > form.end) return;
+                onAdd(form.start, form.end, form.label.trim());
+                setForm({ start: todayStr(), end: todayStr(), label: '' });
+            };
+            return (
+                <div>
+                    <div className="flex flex-wrap gap-2 items-center mb-3">
+                        <input type="date" value={form.start} onChange={e => setForm({ ...form, start: e.target.value })} className="border rounded-lg px-2 py-1.5 text-sm" />
+                        <span className="text-xs text-slate-400">~</span>
+                        <input type="date" value={form.end} onChange={e => setForm({ ...form, end: e.target.value })} className="border rounded-lg px-2 py-1.5 text-sm" />
+                        <input value={form.label} onChange={e => setForm({ ...form, label: e.target.value })} placeholder="예: 여름방학 (선택)" className="border rounded-lg px-2 py-1.5 text-sm flex-1 min-w-[120px]" />
+                        <button onClick={add} className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold hover:bg-indigo-700">+ 추가</button>
+                    </div>
+                    <div className="space-y-1.5">
+                        {dates.length === 0 && <p className="text-xs text-slate-400">등록된 날이 없습니다.</p>}
+                        {dates.map(r => (
+                            <div key={r.id} className="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-lg px-3 py-1.5 text-xs">
+                                <span>{r.start === r.end ? r.start : `${r.start} ~ ${r.end}`}{r.label ? ` · ${r.label}` : ''}</span>
+                                <button onClick={() => onRemove(r.id)} className="text-rose-500 hover:underline">삭제</button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+
+        function SettingsTab({ classCode, classCodes, firebaseConfigText, setFirebaseConfigText, applyFirebaseConfig, connected, syncError, googleClientId, setGoogleClientId, google, data, updateData, timetable, setTimetableSlot, noSchoolDates, addNoSchoolRange, removeNoSchoolRange }) {
             const [exportBusy, setExportBusy] = useState(false);
             const [exportMsg, setExportMsg] = useState('');
             const fileInputRef = useRef(null);
@@ -2491,6 +2617,12 @@ service cloud.firestore {
                                 </p>
                             );
                         })()}
+                    </section>
+
+                    <section>
+                        <h3 className="text-lg font-bold text-slate-900 mb-2">🚫 수업 없는 날</h3>
+                        <p className="text-xs text-slate-500 mb-3">공휴일·방학·재량휴업일처럼 수업이 없는 기간을 등록해두면, 진도기록의 "학기 진도 한번에 만들기"에서 이 기간을 건너뛰어요. 모든 학급에 공통으로 적용돼요.</p>
+                        <NoSchoolDatesEditor dates={noSchoolDates} onAdd={addNoSchoolRange} onRemove={removeNoSchoolRange} />
                     </section>
 
                     <section>
@@ -2683,6 +2815,26 @@ service cloud.firestore {
                     const next = { ...prev };
                     if (code) next[slot] = code; else delete next[slot];
                     localStorage.setItem('sga_timetable', JSON.stringify(next));
+                    return next;
+                });
+            };
+            // Days with no class at all (holidays, breaks, in-service days) — like
+            // the timetable, this applies to every class equally, so it's shared
+            // per device rather than duplicated inside each class's synced data.
+            const [noSchoolDates, setNoSchoolDates] = useState(() => {
+                try { return JSON.parse(localStorage.getItem('sga_noSchoolDates') || '[]'); } catch (e) { return []; }
+            });
+            const addNoSchoolRange = (start, end, label) => {
+                setNoSchoolDates(prev => {
+                    const next = [...prev, { id: uid(), start, end, label: label || '' }];
+                    localStorage.setItem('sga_noSchoolDates', JSON.stringify(next));
+                    return next;
+                });
+            };
+            const removeNoSchoolRange = (id) => {
+                setNoSchoolDates(prev => {
+                    const next = prev.filter(r => r.id !== id);
+                    localStorage.setItem('sga_noSchoolDates', JSON.stringify(next));
                     return next;
                 });
             };
@@ -3085,7 +3237,11 @@ service cloud.firestore {
             const fetchAllProgress = async () => {
                 const result = {};
                 for (const code of classCodes) {
-                    if (code === classCode) { result[code] = data.progress || []; continue; }
+                    // Always re-read from source rather than trusting the current
+                    // class's `data` prop here — right after a bulk apply touches
+                    // this very class, `data` can still be one render behind (React
+                    // hasn't committed the update yet), which would show stale
+                    // content for exactly the class that just changed.
                     try {
                         if (db) {
                             const snap = await db.collection('classes').doc(code).get();
@@ -3105,7 +3261,22 @@ service cloud.firestore {
                 let count = 0;
                 for (const code of classCodes) {
                     if (code === classCode) {
-                        updateData(prev => ({ ...prev, progress: upsertLesson(prev.progress || [], lesson, content, detail, date) }));
+                        if (db) {
+                            // Write directly and await it, rather than going through
+                            // updateData (which fires the transaction in the
+                            // background without waiting). Callers like the compare
+                            // table immediately re-fetch every class's progress right
+                            // after this resolves — without awaiting, that re-fetch
+                            // could still see this class's pre-update content. The
+                            // already-active onSnapshot subscription for this class
+                            // picks up the committed write and updates the UI itself.
+                            await transactionalWrite(db.collection('classes').doc(code), prev => ({
+                                ...prev,
+                                progress: upsertLesson(prev.progress || [], lesson, content, detail, date),
+                            }));
+                        } else {
+                            updateData(prev => ({ ...prev, progress: upsertLesson(prev.progress || [], lesson, content, detail, date) }));
+                        }
                         count++;
                         continue;
                     }
@@ -3199,7 +3370,7 @@ service cloud.firestore {
                         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 sm:p-6">
                             {activeTab === 'classroom' && <ClassroomTab data={data} updateData={updateData} onGroupClick={goToGroupRecord} />}
                             {activeTab === 'roster' && <RosterTab data={data} updateData={updateData} google={{ ...google, clientId: googleClientId }} bulkCreateClasses={bulkCreateClasses} />}
-                            {activeTab === 'progress' && <ProgressTab data={data} updateData={updateData} classCode={classCode} classCodes={classCodes} fetchAllProgress={fetchAllProgress} applyLessonToAllClasses={applyLessonToAllClasses} timetable={timetable} />}
+                            {activeTab === 'progress' && <ProgressTab data={data} updateData={updateData} classCode={classCode} classCodes={classCodes} fetchAllProgress={fetchAllProgress} applyLessonToAllClasses={applyLessonToAllClasses} timetable={timetable} noSchoolDates={noSchoolDates} />}
                             {activeTab === 'record' && <RecordTab data={data} updateData={updateData} focusGroupId={focusGroupId} onFocusHandled={() => setFocusGroupId(null)} />}
                             {activeTab === 'settings' && (
                                 <SettingsTab
@@ -3217,6 +3388,9 @@ service cloud.firestore {
                                     updateData={updateData}
                                     timetable={timetable}
                                     setTimetableSlot={setTimetableSlot}
+                                    noSchoolDates={noSchoolDates}
+                                    addNoSchoolRange={addNoSchoolRange}
+                                    removeNoSchoolRange={removeNoSchoolRange}
                                 />
                             )}
                         </div>
