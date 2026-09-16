@@ -419,6 +419,56 @@
         const weekdayKorean = (dateStr) => KOREAN_WEEKDAYS[parseDateStr(dateStr).getUTCDay()];
         const isNoSchoolDate = (dateStr, ranges) => (ranges || []).some(r => dateStr >= r.start && dateStr <= r.end);
 
+        // ---------------------------------------------------------------
+        // NEIS Open API (open.neis.go.kr) — school lookup + timetable fetch.
+        // Called directly from the browser (this app has no backend); if NEIS
+        // ever blocks that with CORS, fetch() throws an opaque "Failed to
+        // fetch" with no further detail — callers surface that distinctly so
+        // it doesn't read like a wrong API key.
+        // ---------------------------------------------------------------
+        const NEIS_TIMETABLE_ENDPOINT = { '초등학교': 'elsTimetable', '중학교': 'misTimetable', '고등학교': 'hisTimetable' };
+
+        async function neisFetchJson(url) {
+            let res;
+            try {
+                res = await fetch(url);
+            } catch (e) {
+                throw new Error('나이스 서버에 연결하지 못했습니다 (네트워크 문제이거나, 브라우저에서 직접 요청하는 걸 나이스 쪽에서 막았을 수 있어요).');
+            }
+            if (!res.ok) throw new Error('나이스 서버 응답 오류: ' + res.status);
+            const json = await res.json();
+            if (json.RESULT) throw new Error(json.RESULT.MESSAGE || '나이스에서 데이터를 찾지 못했습니다.');
+            return json;
+        }
+
+        async function fetchNeisSchools(key, name) {
+            const params = new URLSearchParams({ KEY: key, Type: 'json', pIndex: '1', pSize: '20', SCHUL_NM: name });
+            const json = await neisFetchJson(`https://open.neis.go.kr/hub/schoolInfo?${params.toString()}`);
+            const rows = (json.schoolInfo && json.schoolInfo[1] && json.schoolInfo[1].row) || [];
+            return rows.map(r => ({
+                officeCode: r.ATPT_OFCDC_SC_CODE,
+                officeName: r.ATPT_OFCDC_SC_NM,
+                schoolCode: r.SD_SCHUL_CODE,
+                schoolName: r.SCHUL_NM,
+            }));
+        }
+
+        async function fetchNeisTimetable(key, school, level, grade, classNm, fromYmd, toYmd) {
+            const endpoint = NEIS_TIMETABLE_ENDPOINT[level] || 'misTimetable';
+            const params = new URLSearchParams({
+                KEY: key, Type: 'json', pIndex: '1', pSize: '100',
+                ATPT_OFCDC_SC_CODE: school.officeCode, SD_SCHUL_CODE: school.schoolCode,
+                GRADE: grade, CLASS_NM: classNm, TI_FROM_YMD: fromYmd, TI_TO_YMD: toYmd,
+            });
+            const json = await neisFetchJson(`https://open.neis.go.kr/hub/${endpoint}?${params.toString()}`);
+            const rows = (json[endpoint] && json[endpoint][1] && json[endpoint][1].row) || [];
+            return rows.map(r => ({
+                date: `${r.ALL_TI_YMD.slice(0, 4)}-${r.ALL_TI_YMD.slice(4, 6)}-${r.ALL_TI_YMD.slice(6, 8)}`,
+                period: parseInt(r.PERIO, 10),
+                subject: r.ITRT_CNTNT,
+            })).sort((a, b) => a.date === b.date ? a.period - b.period : a.date.localeCompare(b.date));
+        }
+
         const BASE_KEYWORD_GROUPS = [
             { category: '수업 활동', tags: ['개념 이해', '탐구·질문', '실습·실기', '경기·시합', '발표', '토의·토론', '실험', '프로젝트', '자료 조사', '문제 해결', '창의적 산출', '꾸준함', '심화 학습', '적용·응용', '자기·동료평가', '포트폴리오'] },
             { category: '교과 역량', tags: ['자기주도 학습', '협업·소통', '창의적 사고', '비판적 사고', '문제해결력', '정보 활용', '발표·표현력', '탐구 지속성', '실생활 연결', '자기 점검(메타인지)'] },
@@ -2477,6 +2527,160 @@
         // ---------------------------------------------------------------
         // Settings tab
         // ---------------------------------------------------------------
+        function NeisImporter({ classCode, subject, setTimetableSlot }) {
+            const [neisKey, setNeisKeyState] = useState(() => localStorage.getItem('sga_neisKey') || '');
+            const [level, setLevelState] = useState(() => localStorage.getItem('sga_neisLevel') || '중학교');
+            const [school, setSchoolState] = useState(() => {
+                try { return JSON.parse(localStorage.getItem('sga_neisSchool') || 'null'); } catch (e) { return null; }
+            });
+            const [schoolQuery, setSchoolQuery] = useState('');
+            const [schoolResults, setSchoolResults] = useState([]);
+            const [searching, setSearching] = useState(false);
+            const [searchMsg, setSearchMsg] = useState('');
+
+            const [grade, setGrade] = useState('');
+            const [classNm, setClassNm] = useState('');
+            const [weekStart, setWeekStart] = useState(todayStr());
+            const [fetchedRows, setFetchedRows] = useState(null);
+            const [selectedKeys, setSelectedKeys] = useState(new Set());
+            const [busy, setBusy] = useState(false);
+            const [msg, setMsg] = useState('');
+
+            const setNeisKey = (v) => { setNeisKeyState(v); localStorage.setItem('sga_neisKey', v); };
+            const setLevel = (v) => { setLevelState(v); localStorage.setItem('sga_neisLevel', v); };
+            const chooseSchool = (s) => { setSchoolState(s); localStorage.setItem('sga_neisSchool', JSON.stringify(s)); setSchoolResults([]); setSchoolQuery(''); };
+            const clearSchool = () => { setSchoolState(null); localStorage.removeItem('sga_neisSchool'); };
+
+            const searchSchool = async () => {
+                if (!neisKey.trim() || !schoolQuery.trim()) return;
+                setSearching(true); setSearchMsg('');
+                try {
+                    const results = await fetchNeisSchools(neisKey.trim(), schoolQuery.trim());
+                    if (!results.length) setSearchMsg('검색 결과가 없습니다.');
+                    setSchoolResults(results);
+                } catch (e) {
+                    setSearchMsg('검색 실패: ' + e.message);
+                }
+                setSearching(false);
+            };
+
+            const doFetch = async () => {
+                if (!school) { setMsg('먼저 학교를 검색해서 선택해주세요.'); return; }
+                if (!neisKey.trim() || !grade.trim() || !classNm.trim() || !weekStart) { setMsg('인증키·학년·반·기준 날짜를 모두 입력해주세요.'); return; }
+                setBusy(true); setMsg(''); setFetchedRows(null);
+                try {
+                    const start = parseDateStr(weekStart);
+                    const startDow = start.getUTCDay();
+                    const mondayOffset = startDow === 0 ? -6 : 1 - startDow;
+                    const monday = new Date(start.getTime() + mondayOffset * 86400000);
+                    const friday = new Date(monday.getTime() + 4 * 86400000);
+                    const fromYmd = formatDateStr(monday).replace(/-/g, '');
+                    const toYmd = formatDateStr(friday).replace(/-/g, '');
+                    const rows = await fetchNeisTimetable(neisKey.trim(), school, level, grade.trim(), classNm.trim(), fromYmd, toYmd);
+                    setFetchedRows(rows);
+                    const preselect = new Set(rows.filter(r => subject && r.subject && r.subject.includes(subject)).map(r => `${r.date}-${r.period}`));
+                    setSelectedKeys(preselect);
+                    if (!rows.length) setMsg('그 주간에는 시간표 데이터가 없습니다.');
+                } catch (e) {
+                    setMsg('시간표를 가져오지 못했습니다: ' + e.message);
+                }
+                setBusy(false);
+            };
+
+            const toggleKey = (key) => setSelectedKeys(prev => {
+                const next = new Set(prev);
+                if (next.has(key)) next.delete(key); else next.add(key);
+                return next;
+            });
+
+            const applySelected = () => {
+                if (!fetchedRows) return;
+                let count = 0;
+                fetchedRows.forEach(r => {
+                    const key = `${r.date}-${r.period}`;
+                    if (!selectedKeys.has(key)) return;
+                    const day = weekdayKorean(r.date);
+                    if (!TIMETABLE_DAYS.includes(day)) return;
+                    setTimetableSlot(`${day}${r.period}`, classCode);
+                    count++;
+                });
+                setMsg(`${count}개 교시를 '${classCode}' 학급 시간표에 반영했습니다.`);
+                setFetchedRows(null);
+            };
+
+            return (
+                <div>
+                    <div className="flex flex-wrap gap-2 items-center mb-2">
+                        <input type="password" value={neisKey} onChange={e => setNeisKey(e.target.value)} placeholder="나이스 오픈API 인증키" className="border rounded-lg px-2 py-1.5 text-sm flex-1 min-w-[160px]" />
+                        <select value={level} onChange={e => setLevel(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm">
+                            <option value="초등학교">초등학교</option>
+                            <option value="중학교">중학교</option>
+                            <option value="고등학교">고등학교</option>
+                        </select>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mb-2">인증키는 <a href="https://open.neis.go.kr" target="_blank" rel="noreferrer" className="underline">open.neis.go.kr</a>에서 무료로 발급받을 수 있어요. 다른 곳에서 쓰고 있는 키를 그대로 써도 괜찮아요.</p>
+
+                    {school ? (
+                        <div className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-3 py-2 mb-2 text-sm">
+                            <span>🏫 {school.schoolName} <span className="text-xs text-slate-400">({school.officeName})</span></span>
+                            <button onClick={clearSchool} className="text-xs text-rose-500 hover:underline">다른 학교</button>
+                        </div>
+                    ) : (
+                        <div className="mb-2">
+                            <div className="flex gap-2">
+                                <input value={schoolQuery} onChange={e => setSchoolQuery(e.target.value)} placeholder="학교 이름 검색 (예: 서울중학교)" className="flex-1 border rounded-lg px-2 py-1.5 text-sm" />
+                                <button onClick={searchSchool} disabled={searching} className="text-xs bg-slate-600 text-white px-3 py-1.5 rounded-lg font-bold hover:bg-slate-700 disabled:opacity-50">{searching ? '검색 중...' : '검색'}</button>
+                            </div>
+                            {searchMsg && <p className="text-xs text-rose-500 mt-1">{searchMsg}</p>}
+                            {schoolResults.length > 0 && (
+                                <div className="mt-1 border border-slate-200 rounded-lg overflow-hidden">
+                                    {schoolResults.map(s => (
+                                        <button key={s.schoolCode} onClick={() => chooseSchool(s)} className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 border-b border-slate-100 last:border-0">
+                                            {s.schoolName} <span className="text-xs text-slate-400">({s.officeName})</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {school && (
+                        <div className="border-t border-slate-100 pt-2 mt-2">
+                            <div className="flex flex-wrap gap-2 items-center mb-2">
+                                <input value={grade} onChange={e => setGrade(e.target.value)} placeholder="학년 (예: 3)" className="border rounded-lg px-2 py-1.5 text-sm w-24" />
+                                <input value={classNm} onChange={e => setClassNm(e.target.value)} placeholder="반 (예: 2)" className="border rounded-lg px-2 py-1.5 text-sm w-24" />
+                                <input type="date" value={weekStart} onChange={e => setWeekStart(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm" />
+                                <button onClick={doFetch} disabled={busy} className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold hover:bg-indigo-700 disabled:opacity-50">{busy ? '가져오는 중...' : '그 주 시간표 가져오기'}</button>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mb-2">지금 보고 있는 '{classCode}' 학급 시간표에 반영돼요. 날짜는 그 주(월~금) 전체를 가져와요.</p>
+                            {msg && <p className="text-xs text-slate-600 mb-2">{msg}</p>}
+
+                            {fetchedRows && fetchedRows.length > 0 && (
+                                <div>
+                                    <p className="text-xs text-slate-500 mb-1">선생님 교과({subject || '미설정'})로 보이는 시간은 미리 체크해뒀어요. 확인하고 필요하면 더 고르거나 빼주세요.</p>
+                                    <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+                                        {fetchedRows.map(r => {
+                                            const key = `${r.date}-${r.period}`;
+                                            return (
+                                                <label key={key} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-slate-50 cursor-pointer">
+                                                    <input type="checkbox" checked={selectedKeys.has(key)} onChange={() => toggleKey(key)} />
+                                                    <span className="font-bold whitespace-nowrap">{r.date} ({weekdayKorean(r.date)}) {r.period}교시</span>
+                                                    <span className="text-slate-500 truncate">{r.subject}</span>
+                                                </label>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="flex justify-end mt-2">
+                                        <button onClick={applySelected} className="text-xs bg-indigo-600 text-white px-4 py-1.5 rounded-lg font-bold hover:bg-indigo-700">선택한 시간 반영하기</button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
         function NoSchoolDatesEditor({ dates, onAdd, onRemove }) {
             const [form, setForm] = useState({ start: todayStr(), end: todayStr(), label: '' });
             const add = () => {
@@ -2640,6 +2844,12 @@ service cloud.firestore {
                                 </p>
                             );
                         })()}
+                    </section>
+
+                    <section>
+                        <h3 className="text-lg font-bold text-slate-900 mb-2">🏫 나이스에서 시간표 가져오기</h3>
+                        <p className="text-xs text-slate-500 mb-3">나이스 오픈API로 학교 시간표를 조회해서, 선생님 교과 시간만 골라 위 시간표에 채워 넣을 수 있어요.</p>
+                        <NeisImporter classCode={classCode} subject={data.subject || '음악'} setTimetableSlot={setTimetableSlot} />
                     </section>
 
                     <section>
