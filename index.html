@@ -251,11 +251,31 @@
             document.body.removeChild(ta);
         }
 
-        function formatStudentRecordText(student, records) {
-            const lines = [...records].sort((a, b) => a.createdAt - b.createdAt).map(r =>
+        // Every round this student belonged to, matched to that round's group
+        // and any 모둠(group) activity records logged for it — the piece
+        // formatStudentRecordText was missing, since it only ever looked at
+        // this student's own individualRecords.
+        function getStudentGroupEntries(student, data) {
+            const entries = [];
+            (data.rounds || []).forEach(round => {
+                const group = (round.groups || []).find(g => g.memberIds.includes(student.id));
+                if (!group) return;
+                (data.groupRecords || [])
+                    .filter(r => r.roundId === round.id && r.groupId === group.id)
+                    .forEach(r => entries.push({ date: r.date, text: `[${r.date}] (${round.name} · ${group.name}) ${r.content}` }));
+            });
+            return entries.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+        }
+
+        function formatStudentRecordText(student, records, data) {
+            const indivEntries = [...records].sort((a, b) => a.createdAt - b.createdAt).map(r =>
                 `[${r.date}] (${r.category || '구분없음'}${r.rating ? ' · ' + RATING_META[r.rating].label : ''}) ${[...(r.tags || []), r.content].filter(Boolean).join(' ')}`
-            ).join('\n');
-            return `${student.name}${student.number ? ' (' + student.number + '번)' : ''} 기록\n\n${lines || '(기록 없음)'}`;
+            );
+            const groupEntries = data ? getStudentGroupEntries(student, data) : [];
+            const header = `${student.name}${student.number ? ' (' + student.number + '번)' : ''} 기록`;
+            let out = `${header}\n\n[개인 기록]\n${indivEntries.length ? indivEntries.join('\n') : '(개인 기록 없음)'}`;
+            if (groupEntries.length) out += `\n\n[모둠 활동 기록]\n${groupEntries.map(g => g.text).join('\n')}`;
+            return out;
         }
 
         // ---------------------------------------------------------------
@@ -1923,7 +1943,7 @@
 
             const copySelectedText = async () => {
                 try {
-                    await copyToClipboard(formatStudentRecordText(student, records));
+                    await copyToClipboard(formatStudentRecordText(student, records, data));
                     setCopyMsg('복사되었습니다!');
                 } catch (e) {
                     setCopyMsg('복사에 실패했습니다: ' + e.message);
@@ -2001,9 +2021,9 @@
 
             const copyAllText = async () => {
                 const parts = students
-                    .map(s => ({ s, recs: data.individualRecords.filter(r => r.studentId === s.id) }))
-                    .filter(({ recs }) => recs.length)
-                    .map(({ s, recs }) => formatStudentRecordText(s, recs));
+                    .map(s => ({ s, recs: data.individualRecords.filter(r => r.studentId === s.id), groupEntries: getStudentGroupEntries(s, data) }))
+                    .filter(({ recs, groupEntries }) => recs.length || groupEntries.length)
+                    .map(({ s, recs }) => formatStudentRecordText(s, recs, data));
                 if (!parts.length) { setBulkCopyMsg('복사할 기록이 없습니다.'); setTimeout(() => setBulkCopyMsg(''), 2500); return; }
                 try {
                     await copyToClipboard(parts.join('\n\n---\n\n'));
