@@ -1808,10 +1808,22 @@
             const [selectedMemberId, setSelectedMemberId] = useState(null);
             const [indivForm, setIndivForm] = useState({ category: '', tags: [], content: '' });
             const [sessionNoteText, setSessionNoteText] = useState('');
-            const [sessionLesson, setSessionLesson] = useState('');
+            const [sessionLesson, setSessionLesson] = useState(() => nextLessonNumber(data.progress));
             const [highlightGroupId, setHighlightGroupId] = useState(null);
+            const lastAutoLessonRef = useRef(null);
 
             useEffect(() => { setSelectedMemberId(null); }, [roundId]);
+
+            // Keep the 차시 stepper suggesting "next lesson number" as real data
+            // loads in (avoids sticking on a stale '1' from before Firebase/
+            // localStorage finished loading), but never clobber a value the
+            // teacher has already typed or adjusted themselves.
+            useEffect(() => {
+                const suggested = nextLessonNumber(data.progress);
+                const priorAuto = lastAutoLessonRef.current;
+                setSessionLesson(prev => (prev === '' || prev === priorAuto) ? suggested : prev);
+                lastAutoLessonRef.current = suggested;
+            }, [data.progress]);
 
             // 교실 배치도에서 모둠 손잡이를 탭했을 때: 그 모둠이 속한 회차로 전환하고,
             // 해당 모둠 카드로 스크롤 + 잠깐 강조 표시.
@@ -2163,6 +2175,18 @@
         // ever fills the gap after an existing earlier lesson — an empty list, or
         // a lesson with nothing recorded before it, is left alone (that's not a
         // "skipped" lesson, it's just the first one being logged).
+        // Suggests the next lesson number after the highest integer lesson
+        // already recorded (e.g. 8차시 recorded -> suggests '9'), so the
+        // teacher doesn't have to type it every class. Falls back to '1' when
+        // nothing numeric has been recorded yet.
+        function nextLessonNumber(progress) {
+            const nums = (progress || [])
+                .map(p => parseFloat(p.lesson))
+                .filter(x => !isNaN(x) && Number.isInteger(x));
+            if (!nums.length) return '1';
+            return String(Math.max(...nums) + 1);
+        }
+
         function findLessonGaps(list, newLesson) {
             const n = parseFloat(newLesson);
             if (isNaN(n) || !Number.isInteger(n)) return [];
