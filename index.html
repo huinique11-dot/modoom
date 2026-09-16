@@ -2175,16 +2175,20 @@
         // ever fills the gap after an existing earlier lesson — an empty list, or
         // a lesson with nothing recorded before it, is left alone (that's not a
         // "skipped" lesson, it's just the first one being logged).
-        // Suggests the next lesson number after the highest integer lesson
-        // already recorded (e.g. 8차시 recorded -> suggests '9'), so the
-        // teacher doesn't have to type it every class. Falls back to '1' when
-        // nothing numeric has been recorded yet.
+        // Suggests which lesson number to log next. If lessons have already
+        // been planned ahead (e.g. via "학기 진도 한번에 만들기") and some of
+        // them aren't checked off as 완료 yet, suggests the earliest of those
+        // — so pre-planning 9~20차시 doesn't make the stepper jump straight to
+        // 21. Otherwise falls back to one past the highest recorded lesson,
+        // or '1' when nothing numeric has been recorded yet.
         function nextLessonNumber(progress) {
             const nums = (progress || [])
-                .map(p => parseFloat(p.lesson))
-                .filter(x => !isNaN(x) && Number.isInteger(x));
+                .map(p => ({ n: parseFloat(p.lesson), completed: p.completed !== false }))
+                .filter(x => !isNaN(x.n) && Number.isInteger(x.n));
             if (!nums.length) return '1';
-            return String(Math.max(...nums) + 1);
+            const incomplete = nums.filter(x => !x.completed).sort((a, b) => a.n - b.n);
+            if (incomplete.length) return String(incomplete[0].n);
+            return String(Math.max(...nums.map(x => x.n)) + 1);
         }
 
         function findLessonGaps(list, newLesson) {
@@ -2202,15 +2206,24 @@
             return gaps;
         }
 
-        function upsertLesson(list, lesson, content, detail, date) {
+        // `completed` is tracked separately from `content` so a lesson can be
+        // planned ahead (blank content, not yet 완료) and simply checked off
+        // after class instead of needing its content rewritten every time.
+        // When the caller doesn't say either way, real content implies the
+        // lesson actually happened; an existing entry with no new content
+        // keeps whatever 완료 state it already had.
+        function upsertLesson(list, lesson, content, detail, date, completed) {
             const existing = list.find(p => p.lesson === lesson);
+            const resolvedCompleted = completed !== undefined
+                ? completed
+                : ((content || '').trim() ? true : (existing ? existing.completed !== false : false));
             if (existing) {
                 const nextDetail = detail === undefined ? (existing.detail || '') : (detail || '');
                 const nextDate = date === undefined ? (existing.date || '') : date;
-                return list.map(p => p.id === existing.id ? { ...p, content, detail: nextDetail, date: nextDate, updatedAt: Date.now() } : p);
+                return list.map(p => p.id === existing.id ? { ...p, content, detail: nextDetail, date: nextDate, completed: resolvedCompleted, updatedAt: Date.now() } : p);
             }
-            const gapEntries = findLessonGaps(list, lesson).map(g => ({ id: uid(), lesson: g, content: '', detail: '', date: date || '', updatedAt: Date.now() }));
-            return [...list, ...gapEntries, { id: uid(), lesson, content, detail: detail || '', date: date || '', updatedAt: Date.now() }];
+            const gapEntries = findLessonGaps(list, lesson).map(g => ({ id: uid(), lesson: g, content: '', detail: '', date: date || '', completed: false, updatedAt: Date.now() }));
+            return [...list, ...gapEntries, { id: uid(), lesson, content, detail: detail || '', date: date || '', completed: resolvedCompleted, updatedAt: Date.now() }];
         }
 
         // Detects the case where a device already has real roster data sitting in
@@ -2297,7 +2310,7 @@
                 updateData(prev => {
                     const list = prev.progress || [];
                     if (editingId) {
-                        return { ...prev, progress: list.map(p => p.id === editingId ? { ...p, lesson: form.lesson.trim(), content: form.content, date: form.date, updatedAt: Date.now() } : p) };
+                        return { ...prev, progress: list.map(p => p.id === editingId ? { ...p, lesson: form.lesson.trim(), content: form.content, date: form.date, completed: form.content.trim() ? true : p.completed, updatedAt: Date.now() } : p) };
                     }
                     // upsertLesson also fills in any skipped lesson numbers between
                     // the last one recorded and this new one as blank placeholders
@@ -2316,9 +2329,13 @@
 
             const applyToAll = async (p) => {
                 setApplyMsg('적용 중...');
-                const count = await applyLessonToAllClasses({ lesson: p.lesson, content: p.content, detail: p.detail, date: p.date });
+                const count = await applyLessonToAllClasses({ lesson: p.lesson, content: p.content, detail: p.detail, date: p.date, completed: p.completed });
                 setApplyMsg(`${count}개 학급에 적용했습니다.`);
                 setTimeout(() => setApplyMsg(''), 3000);
+            };
+
+            const toggleCompleted = (p) => {
+                updateData(prev => ({ ...prev, progress: (prev.progress || []).map(x => x.id === p.id ? { ...x, completed: !(x.completed !== false), updatedAt: Date.now() } : x) }));
             };
 
             const [genForm, setGenForm] = useState({ start: todayStr(), end: todayStr() });
@@ -2342,10 +2359,10 @@
                 if (!candidateDates.length) { setGenMsg('새로 만들 차시가 없어요 (이미 다 있거나, 조건에 맞는 날이 없어요).'); return; }
 
                 const newEntries = candidateDates.map((d, i) => ({
-                    id: uid(), lesson: String(maxLesson + i + 1), content: '', detail: '', date: d, updatedAt: Date.now(),
+                    id: uid(), lesson: String(maxLesson + i + 1), content: '', detail: '', date: d, completed: false, updatedAt: Date.now(),
                 }));
                 updateData(prev => ({ ...prev, progress: [...(prev.progress || []), ...newEntries] }));
-                setGenMsg(`${newEntries.length}개 차시를 만들었어요 (${candidateDates[0]} ~ ${candidateDates[candidateDates.length - 1]}). 내용은 비어있으니 하나씩 채우거나 수정하면 돼요.`);
+                setGenMsg(`${newEntries.length}개 차시를 만들었어요 (${candidateDates[0]} ~ ${candidateDates[candidateDates.length - 1]}). 내용은 비어있으니 하나씩 채우거나 수정하면 되고, 수업을 마치면 완료 체크만 해도 돼요.`);
             };
 
             const [bulkForm, setBulkForm] = useState({ lesson: '', date: todayStr(), content: '' });
@@ -2446,16 +2463,23 @@
                             </form>
                             {applyMsg && <p className="text-xs text-emerald-600 mb-2">{applyMsg}</p>}
                             <div className="space-y-2">
-                                {sorted.map(p => (
-                                    <div key={p.id} className="border border-slate-200 rounded-xl p-3">
+                                {sorted.map(p => {
+                                    const isCompleted = p.completed !== false;
+                                    return (
+                                    <div key={p.id} className={`border rounded-xl p-3 ${isCompleted ? 'border-slate-200' : 'border-dashed border-amber-300 bg-amber-50/40'}`}>
                                         <div className="flex items-start justify-between gap-2">
-                                            <div className="min-w-0 cursor-pointer" onClick={() => openDetail(p)}>
-                                                <span className="text-xs font-bold text-indigo-600">{p.lesson}차시</span>
-                                                {(p.date || dateFromTimestamp(p.updatedAt)) && <span className="text-[11px] text-slate-400 ml-1.5">{p.date || dateFromTimestamp(p.updatedAt)}</span>}
-                                                <p className="text-sm text-slate-700 whitespace-pre-wrap break-words mt-0.5">{p.content || <span className="text-slate-300">내용 없음</span>}</p>
-                                                {p.detail && expandedLessonId !== p.id && (
-                                                    <p className="text-xs text-slate-400 mt-1 truncate">📝 {p.detail}</p>
-                                                )}
+                                            <div className="flex items-start gap-2 min-w-0">
+                                                <input type="checkbox" checked={isCompleted} onChange={() => toggleCompleted(p)}
+                                                    title="완료 체크" className="mt-1 w-4 h-4 shrink-0 accent-indigo-600" />
+                                                <div className="min-w-0 cursor-pointer" onClick={() => openDetail(p)}>
+                                                    <span className="text-xs font-bold text-indigo-600">{p.lesson}차시</span>
+                                                    {(p.date || dateFromTimestamp(p.updatedAt)) && <span className="text-[11px] text-slate-400 ml-1.5">{p.date || dateFromTimestamp(p.updatedAt)}</span>}
+                                                    {!isCompleted && <span className="text-[11px] text-amber-600 font-bold ml-1.5">📌 예정</span>}
+                                                    <p className="text-sm text-slate-700 whitespace-pre-wrap break-words mt-0.5">{p.content || <span className="text-slate-300">내용 없음</span>}</p>
+                                                    {p.detail && expandedLessonId !== p.id && (
+                                                        <p className="text-xs text-slate-400 mt-1 truncate">📝 {p.detail}</p>
+                                                    )}
+                                                </div>
                                             </div>
                                             <div className="flex gap-1 shrink-0">
                                                 <button onClick={() => applyToAll(p)} className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">🔁 전체 적용</button>
@@ -2475,7 +2499,8 @@
                                             </div>
                                         )}
                                     </div>
-                                ))}
+                                    );
+                                })}
                                 {sorted.length === 0 && <p className="text-sm text-slate-400">아직 등록된 진도가 없습니다.</p>}
                             </div>
                         </div>
@@ -2504,10 +2529,13 @@
                                                         const entry = (compareData[code] || []).find(p => p.lesson === lesson);
                                                         const entryDate = entry && (entry.date || dateFromTimestamp(entry.updatedAt));
                                                         return (
-                                                            <td key={lesson} className="px-3 py-2 max-w-[14rem] text-slate-600" title={entry ? entry.content : ''}>
+                                                            <td key={lesson} className={`px-3 py-2 max-w-[14rem] text-slate-600 ${entry && entry.completed === false ? 'bg-amber-50/40' : ''}`} title={entry ? entry.content : ''}>
                                                                 {entry ? (
                                                                     <div>
-                                                                        {entryDate && <div className="text-[10px] text-slate-400 whitespace-nowrap">{entryDate}</div>}
+                                                                        <div className="flex items-center gap-1 whitespace-nowrap">
+                                                                            {entryDate && <span className="text-[10px] text-slate-400">{entryDate}</span>}
+                                                                            {entry.completed === false && <span className="text-[10px] text-amber-600 font-bold">📌 예정</span>}
+                                                                        </div>
                                                                         <div className="truncate">{entry.content || <span className="text-slate-300">(내용 없음)</span>}</div>
                                                                     </div>
                                                                 ) : <span className="text-slate-200">—</span>}
@@ -3514,7 +3542,7 @@ service cloud.firestore {
                 return result;
             };
 
-            const applyLessonToAllClasses = async ({ lesson, content, detail, date }) => {
+            const applyLessonToAllClasses = async ({ lesson, content, detail, date, completed }) => {
                 let count = 0;
                 for (const code of classCodes) {
                     if (code === classCode) {
@@ -3529,10 +3557,10 @@ service cloud.firestore {
                             // picks up the committed write and updates the UI itself.
                             await transactionalWrite(db.collection('classes').doc(code), prev => ({
                                 ...prev,
-                                progress: upsertLesson(prev.progress || [], lesson, content, detail, date),
+                                progress: upsertLesson(prev.progress || [], lesson, content, detail, date, completed),
                             }));
                         } else {
-                            updateData(prev => ({ ...prev, progress: upsertLesson(prev.progress || [], lesson, content, detail, date) }));
+                            updateData(prev => ({ ...prev, progress: upsertLesson(prev.progress || [], lesson, content, detail, date, completed) }));
                         }
                         count++;
                         continue;
@@ -3545,12 +3573,12 @@ service cloud.firestore {
                             // dropped by this merge.
                             await transactionalWrite(db.collection('classes').doc(code), base => ({
                                 ...base,
-                                progress: upsertLesson(base.progress || [], lesson, content, detail, date),
+                                progress: upsertLesson(base.progress || [], lesson, content, detail, date, completed),
                             }));
                         } else {
                             const raw = localStorage.getItem(`sga_data_${code}`);
                             const base = raw ? { ...DEFAULT_DATA, ...JSON.parse(raw) } : DEFAULT_DATA;
-                            const next = { ...base, progress: upsertLesson(base.progress || [], lesson, content, detail, date) };
+                            const next = { ...base, progress: upsertLesson(base.progress || [], lesson, content, detail, date, completed) };
                             localStorage.setItem(`sga_data_${code}`, JSON.stringify(next));
                         }
                         count++;
