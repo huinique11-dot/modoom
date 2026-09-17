@@ -2305,6 +2305,7 @@
             const [loadingCompare, setLoadingCompare] = useState(false);
             const [expandedLessonId, setExpandedLessonId] = useState(null);
             const [detailDraft, setDetailDraft] = useState('');
+            const [contentDraft, setContentDraft] = useState('');
 
             const progress = data.progress || [];
             const sorted = sortLessons(progress);
@@ -2393,10 +2394,16 @@
                 if (expandedLessonId === p.id) { setExpandedLessonId(null); return; }
                 setExpandedLessonId(p.id);
                 setDetailDraft(p.detail || '');
+                setContentDraft(p.content || '');
             };
 
             const saveDetail = (p) => {
-                updateData(prev => ({ ...prev, progress: (prev.progress || []).map(x => x.id === p.id ? { ...x, detail: detailDraft, updatedAt: Date.now() } : x) }));
+                updateData(prev => ({
+                    ...prev,
+                    progress: (prev.progress || []).map(x => x.id === p.id
+                        ? { ...x, content: contentDraft, detail: detailDraft, completed: contentDraft.trim() ? true : x.completed, updatedAt: Date.now() }
+                        : x),
+                }));
                 setExpandedLessonId(null);
             };
 
@@ -2496,6 +2503,9 @@
                                         </div>
                                         {expandedLessonId === p.id && (
                                             <div className="mt-3 pt-3 border-t border-slate-100">
+                                                <input value={contentDraft} onChange={e => setContentDraft(e.target.value)}
+                                                    placeholder="이번 차시 진도/활동 내용"
+                                                    className="w-full border rounded-lg px-3 py-2 text-sm mb-2 outline-none focus:border-indigo-500" />
                                                 <textarea value={detailDraft} onChange={e => setDetailDraft(e.target.value)} rows="4"
                                                     placeholder="이 차시에 대한 더 자세한 메모 (수업 중 특이사항, 다음에 참고할 점 등)"
                                                     className="w-full border rounded-lg p-2 text-sm outline-none focus:border-indigo-500" />
