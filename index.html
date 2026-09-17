@@ -453,19 +453,26 @@
             }));
         }
 
+        // classNm is optional — NEIS has no "by teacher" timetable endpoint, so
+        // to find a teacher's own schedule this omits CLASS_NM and fetches
+        // every class in the grade for the week instead, letting the caller
+        // pick out whichever periods carry the teacher's subject.
         async function fetchNeisTimetable(key, school, level, grade, classNm, fromYmd, toYmd) {
             const endpoint = NEIS_TIMETABLE_ENDPOINT[level] || 'misTimetable';
             const params = new URLSearchParams({
-                KEY: key, Type: 'json', pIndex: '1', pSize: '100',
+                KEY: key, Type: 'json', pIndex: '1', pSize: '1000',
                 ATPT_OFCDC_SC_CODE: school.officeCode, SD_SCHUL_CODE: school.schoolCode,
-                GRADE: grade, CLASS_NM: classNm, TI_FROM_YMD: fromYmd, TI_TO_YMD: toYmd,
+                GRADE: grade, TI_FROM_YMD: fromYmd, TI_TO_YMD: toYmd,
             });
+            if (classNm) params.set('CLASS_NM', classNm);
             const json = await neisFetchJson(`https://open.neis.go.kr/hub/${endpoint}?${params.toString()}`);
             const rows = (json[endpoint] && json[endpoint][1] && json[endpoint][1].row) || [];
             return rows.map(r => ({
                 date: `${r.ALL_TI_YMD.slice(0, 4)}-${r.ALL_TI_YMD.slice(4, 6)}-${r.ALL_TI_YMD.slice(6, 8)}`,
                 period: parseInt(r.PERIO, 10),
                 subject: r.ITRT_CNTNT,
+                grade: r.GRADE,
+                classNm: r.CLASS_NM,
             })).sort((a, b) => a.date === b.date ? a.period - b.period : a.date.localeCompare(b.date));
         }
 
@@ -2579,7 +2586,7 @@
         // ---------------------------------------------------------------
         // Settings tab
         // ---------------------------------------------------------------
-        function NeisImporter({ classCode, subject, setTimetableSlot }) {
+        function NeisImporter({ classCodes, subject, setTimetableSlot }) {
             const [neisKey, setNeisKeyState] = useState(() => localStorage.getItem('sga_neisKey') || '');
             const [level, setLevelState] = useState(() => localStorage.getItem('sga_neisLevel') || '중학교');
             const [school, setSchoolState] = useState(() => {
@@ -2591,10 +2598,10 @@
             const [searchMsg, setSearchMsg] = useState('');
 
             const [grade, setGrade] = useState('');
-            const [classNm, setClassNm] = useState('');
             const [weekStart, setWeekStart] = useState(todayStr());
             const [fetchedRows, setFetchedRows] = useState(null);
             const [selectedKeys, setSelectedKeys] = useState(new Set());
+            const [classMap, setClassMap] = useState({});
             const [busy, setBusy] = useState(false);
             const [msg, setMsg] = useState('');
 
@@ -2618,8 +2625,8 @@
 
             const doFetch = async () => {
                 if (!school) { setMsg('먼저 학교를 검색해서 선택해주세요.'); return; }
-                if (!neisKey.trim() || !grade.trim() || !classNm.trim() || !weekStart) { setMsg('인증키·학년·반·기준 날짜를 모두 입력해주세요.'); return; }
-                setBusy(true); setMsg(''); setFetchedRows(null);
+                if (!neisKey.trim() || !grade.trim() || !weekStart) { setMsg('인증키·학년·기준 날짜를 모두 입력해주세요.'); return; }
+                setBusy(true); setMsg(''); setFetchedRows(null); setClassMap({});
                 try {
                     const start = parseDateStr(weekStart);
                     const startDow = start.getUTCDay();
@@ -2628,10 +2635,22 @@
                     const friday = new Date(monday.getTime() + 4 * 86400000);
                     const fromYmd = formatDateStr(monday).replace(/-/g, '');
                     const toYmd = formatDateStr(friday).replace(/-/g, '');
-                    const rows = await fetchNeisTimetable(neisKey.trim(), school, level, grade.trim(), classNm.trim(), fromYmd, toYmd);
+                    // No CLASS_NM: NEIS has no teacher-based lookup, so this pulls
+                    // every class in the grade for the week and lets the subject
+                    // filter below narrow it down to the teacher's own periods.
+                    const rows = await fetchNeisTimetable(neisKey.trim(), school, level, grade.trim(), '', fromYmd, toYmd);
                     setFetchedRows(rows);
-                    const preselect = new Set(rows.filter(r => subject && r.subject && r.subject.includes(subject)).map(r => `${r.date}-${r.period}`));
+                    const preselect = new Set(rows.filter(r => subject && r.subject && r.subject.includes(subject)).map(r => `${r.date}-${r.period}-${r.classNm}`));
                     setSelectedKeys(preselect);
+                    // Auto-map a NEIS class to an existing app 학급 when their codes
+                    // already match verbatim (e.g. NEIS "2학년 3반" -> app "2-3").
+                    const initialMap = {};
+                    rows.forEach(r => {
+                        if (initialMap[r.classNm]) return;
+                        const guess = `${r.grade}-${r.classNm}`;
+                        if (classCodes.includes(guess)) initialMap[r.classNm] = guess;
+                    });
+                    setClassMap(initialMap);
                     if (!rows.length) setMsg('그 주간에는 시간표 데이터가 없습니다.');
                 } catch (e) {
                     setMsg('시간표를 가져오지 못했습니다: ' + e.message);
@@ -2645,18 +2664,36 @@
                 return next;
             });
 
+            // Only classes actually represented among the checked rows need a
+            // mapping — narrowing this as selections change keeps the mapping
+            // table from listing every class in the grade up front.
+            const relevantClassNms = useMemo(() => {
+                if (!fetchedRows) return [];
+                const set = new Set();
+                fetchedRows.forEach(r => {
+                    if (selectedKeys.has(`${r.date}-${r.period}-${r.classNm}`)) set.add(r.classNm);
+                });
+                return [...set].sort((a, b) => a.localeCompare(b, 'ko'));
+            }, [fetchedRows, selectedKeys]);
+
             const applySelected = () => {
                 if (!fetchedRows) return;
-                let count = 0;
+                let count = 0, skipped = 0;
+                const touchedClasses = new Set();
                 fetchedRows.forEach(r => {
-                    const key = `${r.date}-${r.period}`;
+                    const key = `${r.date}-${r.period}-${r.classNm}`;
                     if (!selectedKeys.has(key)) return;
+                    const target = classMap[r.classNm];
+                    if (!target) { skipped++; return; }
                     const day = weekdayKorean(r.date);
                     if (!TIMETABLE_DAYS.includes(day)) return;
-                    setTimetableSlot(`${day}${r.period}`, classCode);
+                    setTimetableSlot(`${day}${r.period}`, target);
+                    touchedClasses.add(target);
                     count++;
                 });
-                setMsg(`${count}개 교시를 '${classCode}' 학급 시간표에 반영했습니다.`);
+                setMsg(skipped
+                    ? `${count}개 교시를 ${touchedClasses.size}개 학급 시간표에 반영했습니다 (반 매칭이 안 된 ${skipped}개 교시는 건너뛰었어요).`
+                    : `${count}개 교시를 ${touchedClasses.size}개 학급 시간표에 반영했습니다.`);
                 setFetchedRows(null);
             };
 
@@ -2700,11 +2737,10 @@
                         <div className="border-t border-slate-100 pt-2 mt-2">
                             <div className="flex flex-wrap gap-2 items-center mb-2">
                                 <input value={grade} onChange={e => setGrade(e.target.value)} placeholder="학년 (예: 3)" className="border rounded-lg px-2 py-1.5 text-sm w-24" />
-                                <input value={classNm} onChange={e => setClassNm(e.target.value)} placeholder="반 (예: 2)" className="border rounded-lg px-2 py-1.5 text-sm w-24" />
                                 <input type="date" value={weekStart} onChange={e => setWeekStart(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm" />
                                 <button onClick={doFetch} disabled={busy} className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold hover:bg-indigo-700 disabled:opacity-50">{busy ? '가져오는 중...' : '그 주 시간표 가져오기'}</button>
                             </div>
-                            <p className="text-[11px] text-slate-400 mb-2">지금 보고 있는 '{classCode}' 학급 시간표에 반영돼요. 날짜는 그 주(월~금) 전체를 가져와요.</p>
+                            <p className="text-[11px] text-slate-400 mb-2">나이스는 학급별 시간표만 제공하고 교사 이름으로는 조회할 수 없어서, 이 학년의 모든 반을 한 번에 가져온 뒤 선생님 교과가 있는 시간만 골라드려요. 날짜는 그 주(월~금) 전체를 가져와요.</p>
                             {msg && <p className="text-xs text-slate-600 mb-2">{msg}</p>}
 
                             {fetchedRows && fetchedRows.length > 0 && (
@@ -2712,16 +2748,37 @@
                                     <p className="text-xs text-slate-500 mb-1">선생님 교과({subject || '미설정'})로 보이는 시간은 미리 체크해뒀어요. 확인하고 필요하면 더 고르거나 빼주세요.</p>
                                     <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
                                         {fetchedRows.map(r => {
-                                            const key = `${r.date}-${r.period}`;
+                                            const key = `${r.date}-${r.period}-${r.classNm}`;
                                             return (
                                                 <label key={key} className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-slate-50 cursor-pointer">
                                                     <input type="checkbox" checked={selectedKeys.has(key)} onChange={() => toggleKey(key)} />
                                                     <span className="font-bold whitespace-nowrap">{r.date} ({weekdayKorean(r.date)}) {r.period}교시</span>
+                                                    <span className="text-indigo-500 font-bold whitespace-nowrap">{r.grade}학년 {r.classNm}반</span>
                                                     <span className="text-slate-500 truncate">{r.subject}</span>
                                                 </label>
                                             );
                                         })}
                                     </div>
+
+                                    {relevantClassNms.length > 0 && (
+                                        <div className="mt-3 border border-indigo-100 bg-indigo-50/40 rounded-lg p-2">
+                                            <p className="text-[11px] font-bold text-indigo-700 mb-1.5">체크한 시간에 해당하는 나이스 반을 우리 앱 학급에 연결해주세요</p>
+                                            <div className="flex flex-col gap-1.5">
+                                                {relevantClassNms.map(cn => (
+                                                    <div key={cn} className="flex items-center gap-2 text-xs">
+                                                        <span className="font-bold whitespace-nowrap w-20">{grade}학년 {cn}반</span>
+                                                        <span className="text-slate-400">→</span>
+                                                        <select value={classMap[cn] || ''} onChange={e => setClassMap(m => ({ ...m, [cn]: e.target.value }))}
+                                                            className="border rounded-lg px-2 py-1 text-xs flex-1 bg-white">
+                                                            <option value="">연결할 학급 선택</option>
+                                                            {classCodes.map(code => <option key={code} value={code}>{code}</option>)}
+                                                        </select>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+
                                     <div className="flex justify-end mt-2">
                                         <button onClick={applySelected} className="text-xs bg-indigo-600 text-white px-4 py-1.5 rounded-lg font-bold hover:bg-indigo-700">선택한 시간 반영하기</button>
                                     </div>
@@ -2901,7 +2958,7 @@ service cloud.firestore {
                     <section>
                         <h3 className="text-lg font-bold text-slate-900 mb-2">🏫 나이스에서 시간표 가져오기</h3>
                         <p className="text-xs text-slate-500 mb-3">나이스 오픈API로 학교 시간표를 조회해서, 선생님 교과 시간만 골라 위 시간표에 채워 넣을 수 있어요.</p>
-                        <NeisImporter classCode={classCode} subject={data.subject || '음악'} setTimetableSlot={setTimetableSlot} />
+                        <NeisImporter classCodes={classCodes} subject={data.subject || '음악'} setTimetableSlot={setTimetableSlot} />
                     </section>
 
                     <section>
