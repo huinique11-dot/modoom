@@ -37,7 +37,7 @@
         // ---------------------------------------------------------------
         // Constants & small utilities
         // ---------------------------------------------------------------
-        const DEFAULT_DATA = { students: [], rounds: [], groupRecords: [], individualRecords: [], sessionNotes: [], categories: [], progress: [], classroomLayout: {} };
+        const DEFAULT_DATA = { students: [], rounds: [], groupRecords: [], individualRecords: [], sessionNotes: [], categories: [], progress: [], classroomLayout: {}, checklists: [] };
 
         const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
         const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -2139,6 +2139,154 @@
             );
         }
 
+        // 항목별 체크 (수행평가 등): 여러 평가 항목을 열로 두고 학생별로 체크만
+        // 하는 표. 연주/시연이 진행되는 동안 빠르게 탭할 수 있도록 큰 버튼형
+        // 체크박스와 항목별 실시간 인원수를 보여준다.
+        function ChecklistRecord({ data, updateData }) {
+            const checklists = data.checklists || [];
+            const students = useMemo(() => [...data.students].sort(byNumberThenName), [data.students]);
+            const [checklistId, setChecklistId] = useState(checklists[0]?.id || '');
+            useEffect(() => {
+                if (!checklists.find(c => c.id === checklistId)) setChecklistId(checklists[0]?.id || '');
+                // eslint-disable-next-line react-hooks/exhaustive-deps
+            }, [checklists.map(c => c.id).join(',')]);
+            const checklist = checklists.find(c => c.id === checklistId);
+
+            const [creating, setCreating] = useState(false);
+            const [newTitle, setNewTitle] = useState('');
+            const [newItemsText, setNewItemsText] = useState('');
+            const [newItemLabel, setNewItemLabel] = useState('');
+
+            const createChecklist = () => {
+                const items = newItemsText.split(/[,\n]/).map(s => s.trim()).filter(Boolean).map(label => ({ id: uid(), label }));
+                const created = { id: uid(), title: newTitle.trim() || '체크리스트', date: todayStr(), items, marks: {}, createdAt: Date.now() };
+                updateData(prev => ({ ...prev, checklists: [created, ...(prev.checklists || [])] }));
+                setChecklistId(created.id);
+                setNewTitle(''); setNewItemsText(''); setCreating(false);
+            };
+
+            const deleteChecklist = () => {
+                if (!checklist || !window.confirm(`'${checklist.title}' 체크리스트를 삭제할까요?`)) return;
+                updateData(prev => ({ ...prev, checklists: (prev.checklists || []).filter(c => c.id !== checklist.id) }));
+            };
+
+            const addItem = () => {
+                const label = newItemLabel.trim();
+                if (!label || !checklist) return;
+                updateData(prev => ({
+                    ...prev,
+                    checklists: (prev.checklists || []).map(c => c.id !== checklist.id ? c : { ...c, items: [...c.items, { id: uid(), label }] }),
+                }));
+                setNewItemLabel('');
+            };
+
+            const removeItem = (itemId) => {
+                if (!checklist) return;
+                updateData(prev => ({
+                    ...prev,
+                    checklists: (prev.checklists || []).map(c => c.id !== checklist.id ? c : { ...c, items: c.items.filter(i => i.id !== itemId) }),
+                }));
+            };
+
+            const toggleMark = (studentId, itemId) => {
+                if (!checklist) return;
+                updateData(prev => ({
+                    ...prev,
+                    checklists: (prev.checklists || []).map(c => c.id !== checklist.id ? c : {
+                        ...c,
+                        marks: { ...c.marks, [studentId]: { ...(c.marks[studentId] || {}), [itemId]: !(c.marks[studentId] && c.marks[studentId][itemId]) } },
+                    }),
+                }));
+            };
+
+            const countFor = (itemId) => checklist ? Object.values(checklist.marks).filter(m => m && m[itemId]).length : 0;
+
+            return (
+                <div>
+                    <div className="flex flex-wrap gap-2 items-center mb-3">
+                        <select value={checklistId} onChange={e => setChecklistId(e.target.value)} className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[160px]">
+                            {checklists.length === 0 && <option value="">체크리스트 없음</option>}
+                            {checklists.map(c => <option key={c.id} value={c.id}>{c.title} ({c.date})</option>)}
+                        </select>
+                        <button onClick={() => setCreating(v => !v)} className="text-xs bg-indigo-600 text-white px-3 py-2 rounded-lg font-bold hover:bg-indigo-700">+ 새 체크리스트</button>
+                        {checklist && <button onClick={deleteChecklist} className="text-xs px-3 py-2 rounded-lg border border-slate-200 text-rose-500 hover:bg-rose-50">삭제</button>}
+                    </div>
+
+                    {creating && (
+                        <div className="border border-slate-200 rounded-xl p-3 mb-4 bg-slate-50 space-y-2">
+                            <input value={newTitle} onChange={e => setNewTitle(e.target.value)} placeholder="체크리스트 이름 (예: 우쿨렐레 수행평가)" className="w-full border rounded-lg px-3 py-2 text-sm" />
+                            <textarea value={newItemsText} onChange={e => setNewItemsText(e.target.value)} rows="2" placeholder="평가 항목 (쉼표나 줄바꿈으로 구분, 예: 하이코드,4비트,16비트,이펙터)" className="w-full border rounded-lg p-2 text-sm" />
+                            <div className="flex justify-end gap-2">
+                                <button onClick={() => setCreating(false)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500">취소</button>
+                                <button onClick={createChecklist} className="text-xs bg-indigo-600 text-white px-4 py-1.5 rounded-lg font-bold hover:bg-indigo-700">만들기</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {checklist && (
+                        <div>
+                            <div className="flex flex-wrap gap-2 items-center mb-3">
+                                <input value={newItemLabel} onChange={e => setNewItemLabel(e.target.value)}
+                                    onKeyDown={e => { if (e.key === 'Enter') addItem(); }}
+                                    placeholder="항목 추가 (예: 이펙터)" className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[140px]" />
+                                <button onClick={addItem} className="text-xs bg-slate-600 text-white px-3 py-2 rounded-lg font-bold hover:bg-slate-700">+ 항목</button>
+                            </div>
+
+                            {checklist.items.length === 0 ? (
+                                <p className="text-sm text-slate-400">아직 평가 항목이 없습니다. 위에서 추가해주세요.</p>
+                            ) : (
+                                <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                                    <table className="min-w-full text-sm border-collapse">
+                                        <thead>
+                                            <tr>
+                                                <th className="px-3 py-2 text-left sticky left-0 bg-white border-b border-slate-200"></th>
+                                                {checklist.items.map((item, idx) => {
+                                                    const pal = paletteFor(idx);
+                                                    return (
+                                                        <th key={item.id} className={`px-2 py-2 text-center border-b border-slate-200 ${pal.bg}`}>
+                                                            <div className={`text-lg font-bold ${pal.text}`}>{countFor(item.id)}</div>
+                                                            <div className="text-xs font-medium text-slate-600 whitespace-nowrap">{item.label}</div>
+                                                            <button onClick={() => removeItem(item.id)} className="text-[10px] text-slate-400 hover:text-rose-500">삭제</button>
+                                                        </th>
+                                                    );
+                                                })}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {students.map(s => (
+                                                <tr key={s.id} className="border-b border-slate-100 last:border-0">
+                                                    <td className="px-3 py-1.5 whitespace-nowrap sticky left-0 bg-white font-medium text-slate-700">{s.number ? `${s.number} ` : ''}{s.name}</td>
+                                                    {checklist.items.map((item, idx) => {
+                                                        const pal = paletteFor(idx);
+                                                        const checked = !!(checklist.marks[s.id] && checklist.marks[s.id][item.id]);
+                                                        return (
+                                                            <td key={item.id} className="p-1 text-center">
+                                                                <button onClick={() => toggleMark(s.id, item.id)}
+                                                                    className={`w-11 h-11 rounded-lg border-2 flex items-center justify-center text-lg font-bold transition-colors ${checked ? `${pal.dot} border-transparent text-white` : 'bg-slate-50 border-slate-200 text-transparent hover:bg-slate-100'}`}>
+                                                                    ✓
+                                                                </button>
+                                                            </td>
+                                                        );
+                                                    })}
+                                                </tr>
+                                            ))}
+                                            {students.length === 0 && (
+                                                <tr><td colSpan={checklist.items.length + 1} className="px-3 py-4 text-center text-slate-400 text-sm">학생이 없습니다.</td></tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {!checklist && checklists.length === 0 && !creating && (
+                        <p className="text-sm text-slate-400">먼저 '+ 새 체크리스트'로 평가표를 만들어주세요.</p>
+                    )}
+                </div>
+            );
+        }
+
         function RecordTab({ data, updateData, focusGroupId, onFocusHandled }) {
             const [mode, setMode] = useState('byRound');
             useEffect(() => { if (focusGroupId) setMode('byRound'); }, [focusGroupId]);
@@ -2150,9 +2298,12 @@
                         <div className="flex bg-slate-100 rounded-lg p-1 text-xs font-medium">
                             <button onClick={() => setMode('byRound')} className={`px-3 py-1.5 rounded-md ${mode === 'byRound' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>모둠별</button>
                             <button onClick={() => setMode('byStudent')} className={`px-3 py-1.5 rounded-md ${mode === 'byStudent' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>학생별 전체보기</button>
+                            <button onClick={() => setMode('checklist')} className={`px-3 py-1.5 rounded-md ${mode === 'checklist' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-600'}`}>항목 체크</button>
                         </div>
                     </div>
-                    {mode === 'byRound' ? <ByRoundRecord data={data} updateData={updateData} focusGroupId={focusGroupId} onFocusHandled={onFocusHandled} /> : <ByStudentRecord data={data} updateData={updateData} />}
+                    {mode === 'byRound' && <ByRoundRecord data={data} updateData={updateData} focusGroupId={focusGroupId} onFocusHandled={onFocusHandled} />}
+                    {mode === 'byStudent' && <ByStudentRecord data={data} updateData={updateData} />}
+                    {mode === 'checklist' && <ChecklistRecord data={data} updateData={updateData} />}
                 </div>
             );
         }
