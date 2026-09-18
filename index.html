@@ -2145,6 +2145,23 @@
         function ChecklistRecord({ data, updateData }) {
             const checklists = data.checklists || [];
             const students = useMemo(() => [...data.students].sort(byNumberThenName), [data.students]);
+            // 모둠별로 검사받는 활동이라 학생을 번호순으로 쭉 나열하지 않고,
+            // 가장 최근 모둠 배정 기준으로 묶어서 보여준다 (RosterTab의
+            // "모둠별 정렬"과 같은 규칙: 배정 안 된 학생은 맨 뒤 '미배정'으로).
+            const latestRound = data.rounds && data.rounds[0];
+            const groupedStudents = useMemo(() => {
+                if (!latestRound) return [{ groupName: null, groupIdx: -1, students }];
+                const byId = {};
+                students.forEach(s => { byId[s.id] = s; });
+                const clusters = latestRound.groups.map((g, gi) => ({
+                    groupName: g.name, groupIdx: gi,
+                    students: g.memberIds.map(id => byId[id]).filter(Boolean),
+                }));
+                const assignedIds = new Set(latestRound.groups.flatMap(g => g.memberIds));
+                const unassigned = students.filter(s => !assignedIds.has(s.id));
+                if (unassigned.length) clusters.push({ groupName: '미배정', groupIdx: -1, students: unassigned });
+                return clusters;
+            }, [latestRound, students]);
             const [checklistId, setChecklistId] = useState(checklists[0]?.id || '');
             useEffect(() => {
                 if (!checklists.find(c => c.id === checklistId)) setChecklistId(checklists[0]?.id || '');
@@ -2231,6 +2248,7 @@
                                     placeholder="항목 추가 (예: 이펙터)" className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[140px]" />
                                 <button onClick={addItem} className="text-xs bg-slate-600 text-white px-3 py-2 rounded-lg font-bold hover:bg-slate-700">+ 항목</button>
                             </div>
+                            {latestRound && <p className="text-[11px] text-slate-400 mb-2">가장 최근 모둠 배정(&apos;{latestRound.name}&apos;) 기준으로 모둠별로 묶어서 보여줘요.</p>}
 
                             {checklist.items.length === 0 ? (
                                 <p className="text-sm text-slate-400">아직 평가 항목이 없습니다. 위에서 추가해주세요.</p>
@@ -2253,22 +2271,34 @@
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {students.map(s => (
-                                                <tr key={s.id} className="border-b border-slate-100 last:border-0">
-                                                    <td className="px-3 py-1.5 whitespace-nowrap sticky left-0 bg-white font-medium text-slate-700">{s.number ? `${s.number} ` : ''}{s.name}</td>
-                                                    {checklist.items.map((item, idx) => {
-                                                        const pal = paletteFor(idx);
-                                                        const checked = !!(checklist.marks[s.id] && checklist.marks[s.id][item.id]);
-                                                        return (
-                                                            <td key={item.id} className="p-1 text-center">
-                                                                <button onClick={() => toggleMark(s.id, item.id)}
-                                                                    className={`w-11 h-11 rounded-lg border-2 flex items-center justify-center text-lg font-bold transition-colors ${checked ? `${pal.dot} border-transparent text-white` : 'bg-slate-50 border-slate-200 text-transparent hover:bg-slate-100'}`}>
-                                                                    ✓
-                                                                </button>
+                                            {groupedStudents.map(cluster => (
+                                                <React.Fragment key={cluster.groupName || 'all'}>
+                                                    {cluster.groupName && (
+                                                        <tr>
+                                                            <td colSpan={checklist.items.length + 1}
+                                                                className={`px-3 py-1 text-xs font-bold sticky left-0 ${cluster.groupIdx >= 0 ? `${paletteFor(cluster.groupIdx).bg} ${paletteFor(cluster.groupIdx).text}` : 'bg-slate-100 text-slate-500'}`}>
+                                                                {cluster.groupName}
                                                             </td>
-                                                        );
-                                                    })}
-                                                </tr>
+                                                        </tr>
+                                                    )}
+                                                    {cluster.students.map(s => (
+                                                        <tr key={s.id} className="border-b border-slate-100 last:border-0">
+                                                            <td className="px-3 py-1.5 whitespace-nowrap sticky left-0 bg-white font-medium text-slate-700">{s.number ? `${s.number} ` : ''}{s.name}</td>
+                                                            {checklist.items.map((item, idx) => {
+                                                                const pal = paletteFor(idx);
+                                                                const checked = !!(checklist.marks[s.id] && checklist.marks[s.id][item.id]);
+                                                                return (
+                                                                    <td key={item.id} className="p-1 text-center">
+                                                                        <button onClick={() => toggleMark(s.id, item.id)}
+                                                                            className={`w-11 h-11 rounded-lg border-2 flex items-center justify-center text-lg font-bold transition-colors ${checked ? `${pal.dot} border-transparent text-white` : 'bg-slate-50 border-slate-200 text-transparent hover:bg-slate-100'}`}>
+                                                                            ✓
+                                                                        </button>
+                                                                    </td>
+                                                                );
+                                                            })}
+                                                        </tr>
+                                                    ))}
+                                                </React.Fragment>
                                             ))}
                                             {students.length === 0 && (
                                                 <tr><td colSpan={checklist.items.length + 1} className="px-3 py-4 text-center text-slate-400 text-sm">학생이 없습니다.</td></tr>
