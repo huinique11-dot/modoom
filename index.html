@@ -2176,7 +2176,7 @@
 
             const createChecklist = () => {
                 const items = newItemsText.split(/[,\n]/).map(s => s.trim()).filter(Boolean).map(label => ({ id: uid(), label }));
-                const created = { id: uid(), title: newTitle.trim() || '체크리스트', date: todayStr(), items, marks: {}, createdAt: Date.now() };
+                const created = { id: uid(), title: newTitle.trim() || '체크리스트', date: todayStr(), items, marks: {}, absent: {}, createdAt: Date.now() };
                 updateData(prev => ({ ...prev, checklists: [created, ...(prev.checklists || [])] }));
                 setChecklistId(created.id);
                 setNewTitle(''); setNewItemsText(''); setCreating(false);
@@ -2217,6 +2217,19 @@
             };
 
             const countFor = (itemId) => checklist ? Object.values(checklist.marks).filter(m => m && m[itemId]).length : 0;
+
+            // 결석은 학급 전체가 아니라 이 체크리스트(이 날 수행평가)에서만
+            // 의미가 있어서, 학생 명단이 아니라 체크리스트에 저장한다.
+            const toggleAbsent = (studentId) => {
+                if (!checklist) return;
+                updateData(prev => ({
+                    ...prev,
+                    checklists: (prev.checklists || []).map(c => c.id !== checklist.id ? c : {
+                        ...c,
+                        absent: { ...(c.absent || {}), [studentId]: !(c.absent && c.absent[studentId]) },
+                    }),
+                }));
+            };
 
             return (
                 <div>
@@ -2281,23 +2294,34 @@
                                                             </td>
                                                         </tr>
                                                     )}
-                                                    {cluster.students.map(s => (
-                                                        <tr key={s.id} className="border-b border-slate-100 last:border-0">
-                                                            <td className="px-3 py-1.5 whitespace-nowrap sticky left-0 bg-white font-medium text-slate-700">{s.number ? `${s.number} ` : ''}{s.name}</td>
+                                                    {cluster.students.map(s => {
+                                                        const isAbsent = !!(checklist.absent && checklist.absent[s.id]);
+                                                        return (
+                                                        <tr key={s.id} className={`border-b border-slate-100 last:border-0 ${isAbsent ? 'opacity-40' : ''}`}>
+                                                            <td className="px-3 py-1.5 whitespace-nowrap sticky left-0 bg-white font-medium text-slate-700">
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <span>{s.number ? `${s.number} ` : ''}{s.name}</span>
+                                                                    <button onClick={() => toggleAbsent(s.id)}
+                                                                        className={`text-[10px] px-1.5 py-0.5 rounded-full border font-bold shrink-0 ${isAbsent ? 'bg-rose-500 border-rose-500 text-white' : 'border-slate-200 text-slate-400 hover:bg-slate-50'}`}>
+                                                                        결석
+                                                                    </button>
+                                                                </div>
+                                                            </td>
                                                             {checklist.items.map((item, idx) => {
                                                                 const pal = paletteFor(idx);
                                                                 const checked = !!(checklist.marks[s.id] && checklist.marks[s.id][item.id]);
                                                                 return (
                                                                     <td key={item.id} className="p-1 text-center">
-                                                                        <button onClick={() => toggleMark(s.id, item.id)}
-                                                                            className={`w-11 h-11 rounded-lg border-2 flex items-center justify-center text-lg font-bold transition-colors ${checked ? `${pal.dot} border-transparent text-white` : 'bg-slate-50 border-slate-200 text-transparent hover:bg-slate-100'}`}>
+                                                                        <button onClick={() => toggleMark(s.id, item.id)} disabled={isAbsent}
+                                                                            className={`w-11 h-11 rounded-lg border-2 flex items-center justify-center text-lg font-bold transition-colors ${isAbsent ? 'cursor-not-allowed' : ''} ${checked ? `${pal.dot} border-transparent text-white` : 'bg-slate-50 border-slate-200 text-transparent hover:bg-slate-100'}`}>
                                                                             ✓
                                                                         </button>
                                                                     </td>
                                                                 );
                                                             })}
                                                         </tr>
-                                                    ))}
+                                                        );
+                                                    })}
                                                 </React.Fragment>
                                             ))}
                                             {students.length === 0 && (
