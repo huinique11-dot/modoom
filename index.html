@@ -2176,7 +2176,7 @@
 
             const createChecklist = () => {
                 const items = newItemsText.split(/[,\n]/).map(s => s.trim()).filter(Boolean).map(label => ({ id: uid(), label }));
-                const created = { id: uid(), title: newTitle.trim() || '체크리스트', date: todayStr(), items, marks: {}, absent: {}, createdAt: Date.now() };
+                const created = { id: uid(), title: newTitle.trim() || '체크리스트', date: todayStr(), items, marks: {}, absent: {}, completed: false, createdAt: Date.now() };
                 updateData(prev => ({ ...prev, checklists: [created, ...(prev.checklists || [])] }));
                 setChecklistId(created.id);
                 setNewTitle(''); setNewItemsText(''); setCreating(false);
@@ -2231,14 +2231,30 @@
                 }));
             };
 
+            // 평가가 끝난 체크리스트를 잠가서, 이후 실수로 체크가 바뀌는 걸
+            // 막는다. 다시 열기를 누르면 언제든 되돌릴 수 있다.
+            const toggleChecklistCompleted = () => {
+                if (!checklist) return;
+                updateData(prev => ({
+                    ...prev,
+                    checklists: (prev.checklists || []).map(c => c.id !== checklist.id ? c : { ...c, completed: !c.completed }),
+                }));
+            };
+
             return (
                 <div>
                     <div className="flex flex-wrap gap-2 items-center mb-3">
                         <select value={checklistId} onChange={e => setChecklistId(e.target.value)} className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[160px]">
                             {checklists.length === 0 && <option value="">체크리스트 없음</option>}
-                            {checklists.map(c => <option key={c.id} value={c.id}>{c.title} ({c.date})</option>)}
+                            {checklists.map(c => <option key={c.id} value={c.id}>{c.completed ? '✅ ' : ''}{c.title} ({c.date})</option>)}
                         </select>
                         <button onClick={() => setCreating(v => !v)} className="text-xs bg-indigo-600 text-white px-3 py-2 rounded-lg font-bold hover:bg-indigo-700">+ 새 체크리스트</button>
+                        {checklist && (
+                            <button onClick={toggleChecklistCompleted}
+                                className={`text-xs px-3 py-2 rounded-lg font-bold border ${checklist.completed ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                                {checklist.completed ? '🔓 다시 열기' : '✅ 평가 완료'}
+                            </button>
+                        )}
                         {checklist && <button onClick={deleteChecklist} className="text-xs px-3 py-2 rounded-lg border border-slate-200 text-rose-500 hover:bg-rose-50">삭제</button>}
                     </div>
 
@@ -2255,12 +2271,16 @@
 
                     {checklist && (
                         <div>
-                            <div className="flex flex-wrap gap-2 items-center mb-3">
-                                <input value={newItemLabel} onChange={e => setNewItemLabel(e.target.value)}
-                                    onKeyDown={e => { if (e.key === 'Enter') addItem(); }}
-                                    placeholder="항목 추가 (예: 이펙터)" className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[140px]" />
-                                <button onClick={addItem} className="text-xs bg-slate-600 text-white px-3 py-2 rounded-lg font-bold hover:bg-slate-700">+ 항목</button>
-                            </div>
+                            {checklist.completed ? (
+                                <p className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg px-3 py-2 mb-3">✅ 평가가 완료되어 잠겼어요. 수정하려면 '다시 열기'를 눌러주세요.</p>
+                            ) : (
+                                <div className="flex flex-wrap gap-2 items-center mb-3">
+                                    <input value={newItemLabel} onChange={e => setNewItemLabel(e.target.value)}
+                                        onKeyDown={e => { if (e.key === 'Enter') addItem(); }}
+                                        placeholder="항목 추가 (예: 이펙터)" className="border rounded-lg px-3 py-2 text-sm flex-1 min-w-[140px]" />
+                                    <button onClick={addItem} className="text-xs bg-slate-600 text-white px-3 py-2 rounded-lg font-bold hover:bg-slate-700">+ 항목</button>
+                                </div>
+                            )}
                             {latestRound && <p className="text-[11px] text-slate-400 mb-2">가장 최근 모둠 배정(&apos;{latestRound.name}&apos;) 기준으로 모둠별로 묶어서 보여줘요.</p>}
 
                             {checklist.items.length === 0 ? (
@@ -2277,7 +2297,7 @@
                                                         <th key={item.id} className={`px-2 py-2 text-center border-b border-slate-200 ${pal.bg}`}>
                                                             <div className={`text-lg font-bold ${pal.text}`}>{countFor(item.id)}</div>
                                                             <div className="text-xs font-medium text-slate-600 whitespace-nowrap">{item.label}</div>
-                                                            <button onClick={() => removeItem(item.id)} className="text-[10px] text-slate-400 hover:text-rose-500">삭제</button>
+                                                            {!checklist.completed && <button onClick={() => removeItem(item.id)} className="text-[10px] text-slate-400 hover:text-rose-500">삭제</button>}
                                                         </th>
                                                     );
                                                 })}
@@ -2301,8 +2321,8 @@
                                                             <td className="px-3 py-1.5 whitespace-nowrap sticky left-0 bg-white font-medium text-slate-700">
                                                                 <div className="flex items-center gap-1.5">
                                                                     <span>{s.number ? `${s.number} ` : ''}{s.name}</span>
-                                                                    <button onClick={() => toggleAbsent(s.id)}
-                                                                        className={`text-[10px] px-1.5 py-0.5 rounded-full border font-bold shrink-0 ${isAbsent ? 'bg-rose-500 border-rose-500 text-white' : 'border-slate-200 text-slate-400 hover:bg-slate-50'}`}>
+                                                                    <button onClick={() => toggleAbsent(s.id)} disabled={checklist.completed}
+                                                                        className={`text-[10px] px-1.5 py-0.5 rounded-full border font-bold shrink-0 ${isAbsent ? 'bg-rose-500 border-rose-500 text-white' : 'border-slate-200 text-slate-400 hover:bg-slate-50'} ${checklist.completed ? 'cursor-not-allowed' : ''}`}>
                                                                         결석
                                                                     </button>
                                                                 </div>
@@ -2312,8 +2332,8 @@
                                                                 const checked = !!(checklist.marks[s.id] && checklist.marks[s.id][item.id]);
                                                                 return (
                                                                     <td key={item.id} className="p-1 text-center">
-                                                                        <button onClick={() => toggleMark(s.id, item.id)} disabled={isAbsent}
-                                                                            className={`w-11 h-11 rounded-lg border-2 flex items-center justify-center text-lg font-bold transition-colors ${isAbsent ? 'cursor-not-allowed' : ''} ${checked ? `${pal.dot} border-transparent text-white` : 'bg-slate-50 border-slate-200 text-transparent hover:bg-slate-100'}`}>
+                                                                        <button onClick={() => toggleMark(s.id, item.id)} disabled={isAbsent || checklist.completed}
+                                                                            className={`w-11 h-11 rounded-lg border-2 flex items-center justify-center text-lg font-bold transition-colors ${(isAbsent || checklist.completed) ? 'cursor-not-allowed' : ''} ${checked ? `${pal.dot} border-transparent text-white` : 'bg-slate-50 border-slate-200 text-transparent hover:bg-slate-100'}`}>
                                                                             ✓
                                                                         </button>
                                                                     </td>
