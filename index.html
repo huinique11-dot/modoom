@@ -2243,6 +2243,25 @@
 
             const countFor = (itemId) => checklist ? Object.values(checklist.marks).filter(m => m && m[itemId]).length : 0;
 
+            // 이름을 누르면 그 학생의 모든 항목을 한 번에 체크(이미 전부
+            // 체크돼 있으면 반대로 전부 해제)한다 — 예를 들어 가점 방식에서
+            // 만점인 학생을 항목 하나하나 누를 필요 없이 빠르게 처리할 수 있다.
+            const toggleAllForStudent = (studentId) => {
+                if (!checklist || !checklist.items.length) return;
+                const current = checklist.marks[studentId] || {};
+                const allChecked = checklist.items.every(item => current[item.id]);
+                const nextValue = !allChecked;
+                const nextMarksForStudent = {};
+                checklist.items.forEach(item => { nextMarksForStudent[item.id] = nextValue; });
+                updateData(prev => ({
+                    ...prev,
+                    checklists: (prev.checklists || []).map(c => c.id !== checklist.id ? c : {
+                        ...c,
+                        marks: { ...c.marks, [studentId]: nextMarksForStudent },
+                    }),
+                }));
+            };
+
             // 결석은 학급 전체가 아니라 이 체크리스트(이 날 수행평가)에서만
             // 의미가 있어서, 학생 명단이 아니라 체크리스트에 저장한다.
             const toggleAbsent = (studentId) => {
@@ -2375,7 +2394,10 @@
                                                         <tr key={s.id} className={`border-b border-slate-100 last:border-0 ${isAbsent ? 'opacity-40' : ''}`}>
                                                             <td className="px-3 py-1.5 whitespace-nowrap sticky left-0 bg-white font-medium text-slate-700">
                                                                 <div className="flex items-center gap-1.5">
-                                                                    <span>{s.number ? `${s.number} ` : ''}{s.name}</span>
+                                                                    <button onClick={() => toggleAllForStudent(s.id)} disabled={isAbsent || checklist.completed}
+                                                                        title="이름을 누르면 전체 항목이 한 번에 체크돼요" className={`hover:underline ${(isAbsent || checklist.completed) ? 'cursor-not-allowed' : ''}`}>
+                                                                        {s.number ? `${s.number} ` : ''}{s.name}
+                                                                    </button>
                                                                     <button onClick={() => toggleAbsent(s.id)} disabled={checklist.completed}
                                                                         className={`text-[10px] px-1.5 py-0.5 rounded-full border font-bold shrink-0 ${isAbsent ? 'bg-rose-500 border-rose-500 text-white' : 'border-slate-200 text-slate-400 hover:bg-slate-50'} ${checklist.completed ? 'cursor-not-allowed' : ''}`}>
                                                                         결석
