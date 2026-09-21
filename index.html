@@ -2181,9 +2181,9 @@
 
             const doImport = () => {
                 if (!selectedChecklist) return;
-                const labels = selectedChecklist.items.filter(i => selectedIds.has(i.id)).map(i => i.label);
-                if (!labels.length) return;
-                onImport(labels);
+                const picked = selectedChecklist.items.filter(i => selectedIds.has(i.id)).map(i => ({ label: i.label, points: i.points ?? 1 }));
+                if (!picked.length) return;
+                onImport(picked);
                 setOpen(false);
             };
 
@@ -2277,8 +2277,9 @@
             const [newMaxScore, setNewMaxScore] = useState('100');
 
             const createChecklist = () => {
-                const items = newItemsText.split(/[,\n]/).map(s => s.trim()).filter(Boolean).map(label => ({ id: uid(), label }));
-                const maxScore = parseFloat(newMaxScore) || 100;
+                const items = newItemsText.split(/[,\n]/).map(s => s.trim()).filter(Boolean).map(label => ({ id: uid(), label, points: 1 }));
+                const parsedMax = parseFloat(newMaxScore);
+                const maxScore = isNaN(parsedMax) ? (newScoreMode === 'deduct' ? 100 : 0) : parsedMax;
                 const created = { id: uid(), title: newTitle.trim() || '체크리스트', date: todayStr(), items, marks: {}, absent: {}, completed: false, scoreMode: newScoreMode, maxScore, createdAt: Date.now() };
                 updateData(prev => ({ ...prev, checklists: [created, ...(prev.checklists || [])] }));
                 setChecklistId(created.id);
@@ -2324,22 +2325,33 @@
                 }));
             };
 
+            // 항목마다 배점이 다를 수 있어서(예: 어려운 항목은 더 크게),
+            // 만점을 항목 수로 자동 등분하지 않고 각 항목의 배점을 직접
+            // 입력하게 한다.
+            const setItemPoints = (itemId, value) => {
+                if (!checklist) return;
+                const points = parseFloat(value) || 0;
+                updateData(prev => ({
+                    ...prev,
+                    checklists: (prev.checklists || []).map(c => c.id !== checklist.id ? c : { ...c, items: c.items.map(i => i.id === itemId ? { ...i, points } : i) }),
+                }));
+            };
+
             // scoreMode가 없는 예전 체크리스트는 '체크 = 잘한 것'으로 만들어졌던
             // 기존 동작과 같도록 가점 방식으로 취급한다.
             const scoreMode = checklist ? (checklist.scoreMode || 'add') : 'add';
-            const maxScore = checklist ? (checklist.maxScore || 100) : 100;
-            const perItemPoints = (checklist && checklist.items.length) ? maxScore / checklist.items.length : 0;
+            const maxScore = checklist ? (checklist.maxScore ?? 100) : 100;
 
             // 결석이면 점수 자체가 의미 없어 null(‘결석’으로 표시). 감점
-            // 방식은 만점에서 시작해 체크할 때마다 항목별 배점만큼 깎이고
-            // (예: 근찬이처럼 하나도 체크 안 하면 만점), 가점 방식은 0점에서
-            // 시작해 체크할 때마다 항목별 배점만큼 쌓인다.
+            // 방식은 만점(기본점수)에서 시작해 체크된 항목의 배점만큼 깎이고
+            // (예: 근찬이처럼 하나도 체크 안 하면 만점), 가점 방식은
+            // 기본점수에서 시작해 체크된 항목의 배점만큼 쌓인다.
             const scoreFor = (studentId) => {
                 if (!checklist || !checklist.items.length) return null;
                 if (checklist.absent && checklist.absent[studentId]) return null;
-                const checkedCount = Object.values(checklist.marks[studentId] || {}).filter(Boolean).length;
-                const earned = checkedCount * perItemPoints;
-                const score = scoreMode === 'deduct' ? maxScore - earned : earned;
+                const marks = checklist.marks[studentId] || {};
+                const earned = checklist.items.reduce((sum, item) => sum + (marks[item.id] ? (item.points || 0) : 0), 0);
+                const score = scoreMode === 'deduct' ? maxScore - earned : maxScore + earned;
                 return Math.round(score * 10) / 10;
             };
 
@@ -2353,7 +2365,7 @@
                 if (!label || !checklist) return;
                 updateData(prev => ({
                     ...prev,
-                    checklists: (prev.checklists || []).map(c => c.id !== checklist.id ? c : { ...c, items: [...c.items, { id: uid(), label }] }),
+                    checklists: (prev.checklists || []).map(c => c.id !== checklist.id ? c : { ...c, items: [...c.items, { id: uid(), label, points: 1 }] }),
                 }));
                 setNewItemLabel('');
             };
@@ -2428,7 +2440,7 @@
                         const names = untouched.map(s => s.name).join(', ');
                         const explain = scoreMode === 'deduct'
                             ? `감점 방식이라 만점(${maxScore}점) 처리됩니다.`
-                            : `가점 방식이라 0점 처리됩니다. 체크를 깜빡한 게 아닌지 확인해주세요.`;
+                            : `가점 방식이라 기본점수(${maxScore}점)로 처리됩니다. 체크를 깜빡한 게 아닌지 확인해주세요.`;
                         if (!window.confirm(`하나도 체크되지 않은 학생이 있어요: ${names}\n${explain}\n\n이대로 평가를 완료할까요?`)) return;
                     }
                 }
@@ -2460,17 +2472,17 @@
                             <input value={newTitle} onChange={e => setNewTitle(e.target.value)} placeholder="체크리스트 이름 (예: 우쿨렐레 수행평가)" className="w-full border rounded-lg px-3 py-2 text-sm" />
                             <textarea value={newItemsText} onChange={e => setNewItemsText(e.target.value)} rows="2" placeholder="평가 항목 (쉼표나 줄바꿈으로 구분, 예: 하이코드,4비트,16비트,이펙터)" className="w-full border rounded-lg p-2 text-sm" />
                             <ImportItemsPanel classCodes={classCodes} fetchAllChecklists={fetchAllChecklists}
-                                onImport={labels => setNewItemsText(prev => (prev.trim() ? prev.trim() + ',' : '') + labels.join(','))} />
+                                onImport={picked => setNewItemsText(prev => (prev.trim() ? prev.trim() + ',' : '') + picked.map(p => p.label).join(','))} />
                             <div>
                                 <p className="text-[11px] font-bold text-slate-500 mb-1">채점 방식</p>
                                 <div className="flex bg-white border border-slate-200 rounded-lg p-1 text-xs font-medium w-fit">
-                                    <button type="button" onClick={() => setNewScoreMode('deduct')} className={`px-3 py-1.5 rounded-md ${newScoreMode === 'deduct' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-600'}`}>감점 (기본 만점)</button>
-                                    <button type="button" onClick={() => setNewScoreMode('add')} className={`px-3 py-1.5 rounded-md ${newScoreMode === 'add' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-600'}`}>가점 (기본 0점)</button>
+                                    <button type="button" onClick={() => { setNewScoreMode('deduct'); setNewMaxScore('100'); }} className={`px-3 py-1.5 rounded-md ${newScoreMode === 'deduct' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-600'}`}>감점 (기본 만점)</button>
+                                    <button type="button" onClick={() => { setNewScoreMode('add'); setNewMaxScore('0'); }} className={`px-3 py-1.5 rounded-md ${newScoreMode === 'add' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-600'}`}>가점 (기본 0점)</button>
                                 </div>
-                                <p className="text-[11px] text-slate-400 mt-1">{newScoreMode === 'deduct' ? '체크할 때마다 감점돼요 (하나도 안 체크하면 만점).' : '체크할 때마다 가점돼요 (하나도 안 체크하면 0점).'}</p>
+                                <p className="text-[11px] text-slate-400 mt-1">{newScoreMode === 'deduct' ? '체크한 항목의 배점만큼 감점돼요.' : '체크한 항목의 배점만큼 가점돼요.'}</p>
                             </div>
                             <div className="flex items-center gap-2">
-                                <label className="text-[11px] font-bold text-slate-500">{newScoreMode === 'deduct' ? '만점' : '기본점수'} (기본 100)</label>
+                                <label className="text-[11px] font-bold text-slate-500">{newScoreMode === 'deduct' ? '만점' : '기본점수'}</label>
                                 <input type="number" value={newMaxScore} onChange={e => setNewMaxScore(e.target.value)} className="border rounded-lg px-2 py-1 text-sm w-20" />
                             </div>
                             <div className="flex justify-end gap-2">
@@ -2499,13 +2511,13 @@
                                         <input type="number" value={maxScore} onChange={e => setMaxScore(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm w-16" />
                                     </div>
                                     <ImportItemsPanel classCodes={classCodes} fetchAllChecklists={fetchAllChecklists}
-                                        onImport={labels => updateData(prev => ({
+                                        onImport={picked => updateData(prev => ({
                                             ...prev,
-                                            checklists: (prev.checklists || []).map(c => c.id !== checklist.id ? c : { ...c, items: [...c.items, ...labels.map(label => ({ id: uid(), label }))] }),
+                                            checklists: (prev.checklists || []).map(c => c.id !== checklist.id ? c : { ...c, items: [...c.items, ...picked.map(p => ({ id: uid(), label: p.label, points: p.points ?? 1 }))] }),
                                         }))} />
                                 </div>
                             )}
-                            {latestRound && <p className="text-[11px] text-slate-400 mb-2">가장 최근 모둠 배정(&apos;{latestRound.name}&apos;) 기준으로 모둠별로 묶어서 보여줘요. {scoreMode === 'deduct' ? `체크 안 하면 만점(${maxScore}점)이에요.` : '체크 안 하면 0점이에요.'}</p>}
+                            {latestRound && <p className="text-[11px] text-slate-400 mb-2">가장 최근 모둠 배정(&apos;{latestRound.name}&apos;) 기준으로 모둠별로 묶어서 보여줘요. 체크 안 하면 {scoreMode === 'deduct' ? '만점' : '기본점수'}({maxScore}점)이에요.</p>}
 
                             {checklist.items.length === 0 ? (
                                 <p className="text-sm text-slate-400">아직 평가 항목이 없습니다. 위에서 추가해주세요.</p>
@@ -2526,7 +2538,16 @@
                                                                 <InlineEditText value={item.label} onChange={label => renameItem(item.id, label)}
                                                                     className="text-xs font-medium text-slate-600 whitespace-nowrap" />
                                                             )}
-                                                            <div className="text-[10px] text-slate-400">{scoreMode === 'deduct' ? '−' : '+'}{Math.round(perItemPoints * 10) / 10}점</div>
+                                                            {checklist.completed ? (
+                                                                <div className="text-[10px] text-slate-400">{scoreMode === 'deduct' ? '−' : '+'}{item.points ?? 1}점</div>
+                                                            ) : (
+                                                                <div className="flex items-center justify-center gap-0.5 text-[10px] text-slate-400">
+                                                                    <span>{scoreMode === 'deduct' ? '−' : '+'}</span>
+                                                                    <input type="number" value={item.points ?? 1} onChange={e => setItemPoints(item.id, e.target.value)}
+                                                                        className="w-10 text-center border rounded px-0.5 py-0.5 text-[10px]" />
+                                                                    <span>점</span>
+                                                                </div>
+                                                            )}
                                                             {!checklist.completed && <button onClick={() => removeItem(item.id)} className="text-[10px] text-slate-400 hover:text-rose-500">삭제</button>}
                                                         </th>
                                                     );
