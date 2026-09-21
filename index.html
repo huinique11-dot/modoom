@@ -2142,7 +2142,107 @@
         // 항목별 체크 (수행평가 등): 여러 평가 항목을 열로 두고 학생별로 체크만
         // 하는 표. 연주/시연이 진행되는 동안 빠르게 탭할 수 있도록 큰 버튼형
         // 체크박스와 항목별 실시간 인원수를 보여준다.
-        function ChecklistRecord({ data, updateData }) {
+        // 다른 학급의 체크리스트에서 항목만 골라 가져올 수 있게 해주는
+        // 패널. 가져오는 건 항목 이름뿐이고, 그 학급의 체크 표시나 결석
+        // 여부 같은 진행 상태는 섞이지 않는다.
+        function ImportItemsPanel({ classCodes, fetchAllChecklists, onImport }) {
+            const [open, setOpen] = useState(false);
+            const [loading, setLoading] = useState(false);
+            const [allChecklists, setAllChecklists] = useState(null);
+            const [importClassCode, setImportClassCode] = useState('');
+            const [importChecklistId, setImportChecklistId] = useState('');
+            const [selectedIds, setSelectedIds] = useState(new Set());
+
+            const toggleOpen = async () => {
+                if (!open && !allChecklists) {
+                    setLoading(true);
+                    const result = await fetchAllChecklists();
+                    setAllChecklists(result);
+                    setLoading(false);
+                }
+                setOpen(v => !v);
+            };
+
+            const otherClassCodes = Object.keys(allChecklists || {});
+            const checklistsForClass = (allChecklists && importClassCode) ? (allChecklists[importClassCode] || []) : [];
+            const selectedChecklist = checklistsForClass.find(c => c.id === importChecklistId);
+
+            const chooseClass = (code) => { setImportClassCode(code); setImportChecklistId(''); setSelectedIds(new Set()); };
+            const chooseChecklist = (id) => {
+                setImportChecklistId(id);
+                const c = checklistsForClass.find(x => x.id === id);
+                setSelectedIds(new Set(c ? c.items.map(i => i.id) : []));
+            };
+            const toggleItemSelected = (id) => setSelectedIds(prev => {
+                const next = new Set(prev);
+                if (next.has(id)) next.delete(id); else next.add(id);
+                return next;
+            });
+
+            const doImport = () => {
+                if (!selectedChecklist) return;
+                const labels = selectedChecklist.items.filter(i => selectedIds.has(i.id)).map(i => i.label);
+                if (!labels.length) return;
+                onImport(labels);
+                setOpen(false);
+            };
+
+            if (classCodes.length <= 1) return null;
+
+            return (
+                <div>
+                    <button type="button" onClick={toggleOpen} className="text-xs px-3 py-2 rounded-lg border border-slate-200 text-indigo-600 hover:bg-indigo-50 font-bold">📥 다른 반에서 가져오기</button>
+                    {open && (
+                        <div className="border border-slate-200 rounded-xl p-3 mt-2 bg-slate-50 space-y-2">
+                            {loading ? (
+                                <p className="text-xs text-slate-400">불러오는 중...</p>
+                            ) : (
+                                <>
+                                    <select value={importClassCode} onChange={e => chooseClass(e.target.value)} className="w-full border rounded-lg px-2 py-1.5 text-sm bg-white">
+                                        <option value="">학급 선택</option>
+                                        {otherClassCodes.map(code => <option key={code} value={code}>{code}</option>)}
+                                    </select>
+                                    {importClassCode && (
+                                        checklistsForClass.length === 0 ? (
+                                            <p className="text-xs text-slate-400">이 학급에는 체크리스트가 없어요.</p>
+                                        ) : (
+                                            <select value={importChecklistId} onChange={e => chooseChecklist(e.target.value)} className="w-full border rounded-lg px-2 py-1.5 text-sm bg-white">
+                                                <option value="">체크리스트 선택</option>
+                                                {checklistsForClass.map(c => <option key={c.id} value={c.id}>{c.title} ({c.date})</option>)}
+                                            </select>
+                                        )
+                                    )}
+                                    {selectedChecklist && (
+                                        selectedChecklist.items.length === 0 ? (
+                                            <p className="text-xs text-slate-400">이 체크리스트에는 항목이 없어요.</p>
+                                        ) : (
+                                            <div>
+                                                <p className="text-[11px] text-slate-500 mb-1">가져올 항목을 골라주세요 (기본 전체 선택)</p>
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {selectedChecklist.items.map(item => (
+                                                        <label key={item.id} className={`text-xs px-2 py-1 rounded-full border cursor-pointer select-none ${selectedIds.has(item.id) ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200 text-slate-600'}`}>
+                                                            <input type="checkbox" className="hidden" checked={selectedIds.has(item.id)} onChange={() => toggleItemSelected(item.id)} />
+                                                            {item.label}
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                                <div className="flex justify-end gap-2 mt-2">
+                                                    <button type="button" onClick={() => setOpen(false)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500">취소</button>
+                                                    <button type="button" onClick={doImport} disabled={selectedIds.size === 0}
+                                                        className="text-xs bg-indigo-600 text-white px-4 py-1.5 rounded-lg font-bold hover:bg-indigo-700 disabled:opacity-50">선택한 항목 가져오기 ({selectedIds.size})</button>
+                                                </div>
+                                            </div>
+                                        )
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function ChecklistRecord({ data, updateData, classCodes, fetchAllChecklists }) {
             const checklists = data.checklists || [];
             const students = useMemo(() => [...data.students].sort(byNumberThenName), [data.students]);
             // 모둠별로 검사받는 활동이라 학생을 번호순으로 쭉 나열하지 않고,
@@ -2174,37 +2274,73 @@
             const [newItemsText, setNewItemsText] = useState('');
             const [newItemLabel, setNewItemLabel] = useState('');
             const [newScoreMode, setNewScoreMode] = useState('deduct');
+            const [newMaxScore, setNewMaxScore] = useState('100');
 
             const createChecklist = () => {
                 const items = newItemsText.split(/[,\n]/).map(s => s.trim()).filter(Boolean).map(label => ({ id: uid(), label }));
-                const created = { id: uid(), title: newTitle.trim() || '체크리스트', date: todayStr(), items, marks: {}, absent: {}, completed: false, scoreMode: newScoreMode, createdAt: Date.now() };
+                const maxScore = parseFloat(newMaxScore) || 100;
+                const created = { id: uid(), title: newTitle.trim() || '체크리스트', date: todayStr(), items, marks: {}, absent: {}, completed: false, scoreMode: newScoreMode, maxScore, createdAt: Date.now() };
                 updateData(prev => ({ ...prev, checklists: [created, ...(prev.checklists || [])] }));
                 setChecklistId(created.id);
-                setNewTitle(''); setNewItemsText(''); setNewScoreMode('deduct'); setCreating(false);
+                setNewTitle(''); setNewItemsText(''); setNewScoreMode('deduct'); setNewMaxScore('100'); setCreating(false);
             };
 
+            // 감점 방식의 '체크 = 못함'과 가점 방식의 '체크 = 잘함'은 정반대
+            // 의미라서, 방식을 바꿀 때 실제로 체크된 값도 전부 뒤집어야
+            // 같은 평가 결과(점수)가 유지된다 — 안 그러면 이미 체크해둔
+            // 표시가 반대 의미로 읽히게 된다.
             const setScoreMode = (mode) => {
-                if (!checklist) return;
+                if (!checklist || (checklist.scoreMode || 'add') === mode) return;
                 updateData(prev => ({
                     ...prev,
-                    checklists: (prev.checklists || []).map(c => c.id !== checklist.id ? c : { ...c, scoreMode: mode }),
+                    checklists: (prev.checklists || []).map(c => {
+                        if (c.id !== checklist.id) return c;
+                        const invertedMarks = {};
+                        students.forEach(s => {
+                            const current = c.marks[s.id] || {};
+                            const inverted = {};
+                            c.items.forEach(item => { inverted[item.id] = !current[item.id]; });
+                            invertedMarks[s.id] = inverted;
+                        });
+                        return { ...c, scoreMode: mode, marks: invertedMarks };
+                    }),
+                }));
+            };
+
+            const setMaxScore = (value) => {
+                if (!checklist) return;
+                const maxScore = parseFloat(value) || 0;
+                updateData(prev => ({
+                    ...prev,
+                    checklists: (prev.checklists || []).map(c => c.id !== checklist.id ? c : { ...c, maxScore }),
+                }));
+            };
+
+            const renameItem = (itemId, label) => {
+                if (!checklist || !label.trim()) return;
+                updateData(prev => ({
+                    ...prev,
+                    checklists: (prev.checklists || []).map(c => c.id !== checklist.id ? c : { ...c, items: c.items.map(i => i.id === itemId ? { ...i, label: label.trim() } : i) }),
                 }));
             };
 
             // scoreMode가 없는 예전 체크리스트는 '체크 = 잘한 것'으로 만들어졌던
             // 기존 동작과 같도록 가점 방식으로 취급한다.
             const scoreMode = checklist ? (checklist.scoreMode || 'add') : 'add';
+            const maxScore = checklist ? (checklist.maxScore || 100) : 100;
+            const perItemPoints = (checklist && checklist.items.length) ? maxScore / checklist.items.length : 0;
 
             // 결석이면 점수 자체가 의미 없어 null(‘결석’으로 표시). 감점
-            // 방식은 만점에서 시작해 체크할 때마다 깎이고(예: 근찬이처럼
-            // 하나도 체크 안 하면 만점), 가점 방식은 0점에서 시작해 체크할
-            // 때마다 쌓인다.
+            // 방식은 만점에서 시작해 체크할 때마다 항목별 배점만큼 깎이고
+            // (예: 근찬이처럼 하나도 체크 안 하면 만점), 가점 방식은 0점에서
+            // 시작해 체크할 때마다 항목별 배점만큼 쌓인다.
             const scoreFor = (studentId) => {
                 if (!checklist || !checklist.items.length) return null;
                 if (checklist.absent && checklist.absent[studentId]) return null;
                 const checkedCount = Object.values(checklist.marks[studentId] || {}).filter(Boolean).length;
-                const pct = Math.round((checkedCount / checklist.items.length) * 100);
-                return scoreMode === 'deduct' ? 100 - pct : pct;
+                const earned = checkedCount * perItemPoints;
+                const score = scoreMode === 'deduct' ? maxScore - earned : earned;
+                return Math.round(score * 10) / 10;
             };
 
             const deleteChecklist = () => {
@@ -2291,7 +2427,7 @@
                     if (untouched.length) {
                         const names = untouched.map(s => s.name).join(', ');
                         const explain = scoreMode === 'deduct'
-                            ? `감점 방식이라 만점 처리됩니다.`
+                            ? `감점 방식이라 만점(${maxScore}점) 처리됩니다.`
                             : `가점 방식이라 0점 처리됩니다. 체크를 깜빡한 게 아닌지 확인해주세요.`;
                         if (!window.confirm(`하나도 체크되지 않은 학생이 있어요: ${names}\n${explain}\n\n이대로 평가를 완료할까요?`)) return;
                     }
@@ -2323,6 +2459,8 @@
                         <div className="border border-slate-200 rounded-xl p-3 mb-4 bg-slate-50 space-y-2">
                             <input value={newTitle} onChange={e => setNewTitle(e.target.value)} placeholder="체크리스트 이름 (예: 우쿨렐레 수행평가)" className="w-full border rounded-lg px-3 py-2 text-sm" />
                             <textarea value={newItemsText} onChange={e => setNewItemsText(e.target.value)} rows="2" placeholder="평가 항목 (쉼표나 줄바꿈으로 구분, 예: 하이코드,4비트,16비트,이펙터)" className="w-full border rounded-lg p-2 text-sm" />
+                            <ImportItemsPanel classCodes={classCodes} fetchAllChecklists={fetchAllChecklists}
+                                onImport={labels => setNewItemsText(prev => (prev.trim() ? prev.trim() + ',' : '') + labels.join(','))} />
                             <div>
                                 <p className="text-[11px] font-bold text-slate-500 mb-1">채점 방식</p>
                                 <div className="flex bg-white border border-slate-200 rounded-lg p-1 text-xs font-medium w-fit">
@@ -2330,6 +2468,10 @@
                                     <button type="button" onClick={() => setNewScoreMode('add')} className={`px-3 py-1.5 rounded-md ${newScoreMode === 'add' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-600'}`}>가점 (기본 0점)</button>
                                 </div>
                                 <p className="text-[11px] text-slate-400 mt-1">{newScoreMode === 'deduct' ? '체크할 때마다 감점돼요 (하나도 안 체크하면 만점).' : '체크할 때마다 가점돼요 (하나도 안 체크하면 0점).'}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <label className="text-[11px] font-bold text-slate-500">{newScoreMode === 'deduct' ? '만점' : '기본점수'} (기본 100)</label>
+                                <input type="number" value={newMaxScore} onChange={e => setNewMaxScore(e.target.value)} className="border rounded-lg px-2 py-1 text-sm w-20" />
                             </div>
                             <div className="flex justify-end gap-2">
                                 <button onClick={() => setCreating(false)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500">취소</button>
@@ -2352,9 +2494,18 @@
                                         <button onClick={() => setScoreMode('deduct')} className={`px-2.5 py-1.5 rounded-md ${scoreMode === 'deduct' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-500'}`}>감점</button>
                                         <button onClick={() => setScoreMode('add')} className={`px-2.5 py-1.5 rounded-md ${scoreMode === 'add' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-500'}`}>가점</button>
                                     </div>
+                                    <div className="flex items-center gap-1.5">
+                                        <label className="text-[11px] font-bold text-slate-500 whitespace-nowrap">{scoreMode === 'deduct' ? '만점' : '기본점수'}</label>
+                                        <input type="number" value={maxScore} onChange={e => setMaxScore(e.target.value)} className="border rounded-lg px-2 py-1.5 text-sm w-16" />
+                                    </div>
+                                    <ImportItemsPanel classCodes={classCodes} fetchAllChecklists={fetchAllChecklists}
+                                        onImport={labels => updateData(prev => ({
+                                            ...prev,
+                                            checklists: (prev.checklists || []).map(c => c.id !== checklist.id ? c : { ...c, items: [...c.items, ...labels.map(label => ({ id: uid(), label }))] }),
+                                        }))} />
                                 </div>
                             )}
-                            {latestRound && <p className="text-[11px] text-slate-400 mb-2">가장 최근 모둠 배정(&apos;{latestRound.name}&apos;) 기준으로 모둠별로 묶어서 보여줘요. {scoreMode === 'deduct' ? '체크 안 하면 만점이에요.' : '체크 안 하면 0점이에요.'}</p>}
+                            {latestRound && <p className="text-[11px] text-slate-400 mb-2">가장 최근 모둠 배정(&apos;{latestRound.name}&apos;) 기준으로 모둠별로 묶어서 보여줘요. {scoreMode === 'deduct' ? `체크 안 하면 만점(${maxScore}점)이에요.` : '체크 안 하면 0점이에요.'}</p>}
 
                             {checklist.items.length === 0 ? (
                                 <p className="text-sm text-slate-400">아직 평가 항목이 없습니다. 위에서 추가해주세요.</p>
@@ -2369,7 +2520,13 @@
                                                     return (
                                                         <th key={item.id} className={`px-2 py-2 text-center sticky top-0 z-10 border-b border-slate-200 ${pal.bg}`}>
                                                             <div className={`text-lg font-bold ${pal.text}`}>{countFor(item.id)}</div>
-                                                            <div className="text-xs font-medium text-slate-600 whitespace-nowrap">{item.label}</div>
+                                                            {checklist.completed ? (
+                                                                <div className="text-xs font-medium text-slate-600 whitespace-nowrap">{item.label}</div>
+                                                            ) : (
+                                                                <InlineEditText value={item.label} onChange={label => renameItem(item.id, label)}
+                                                                    className="text-xs font-medium text-slate-600 whitespace-nowrap" />
+                                                            )}
+                                                            <div className="text-[10px] text-slate-400">{scoreMode === 'deduct' ? '−' : '+'}{Math.round(perItemPoints * 10) / 10}점</div>
                                                             {!checklist.completed && <button onClick={() => removeItem(item.id)} className="text-[10px] text-slate-400 hover:text-rose-500">삭제</button>}
                                                         </th>
                                                     );
@@ -2445,7 +2602,7 @@
             );
         }
 
-        function RecordTab({ data, updateData, focusGroupId, onFocusHandled }) {
+        function RecordTab({ data, updateData, focusGroupId, onFocusHandled, classCodes, fetchAllChecklists }) {
             const [mode, setMode] = useState('byRound');
             useEffect(() => { if (focusGroupId) setMode('byRound'); }, [focusGroupId]);
 
@@ -2461,7 +2618,7 @@
                     </div>
                     {mode === 'byRound' && <ByRoundRecord data={data} updateData={updateData} focusGroupId={focusGroupId} onFocusHandled={onFocusHandled} />}
                     {mode === 'byStudent' && <ByStudentRecord data={data} updateData={updateData} />}
-                    {mode === 'checklist' && <ChecklistRecord data={data} updateData={updateData} />}
+                    {mode === 'checklist' && <ChecklistRecord data={data} updateData={updateData} classCodes={classCodes} fetchAllChecklists={fetchAllChecklists} />}
                 </div>
             );
         }
@@ -3918,6 +4075,28 @@ service cloud.firestore {
                 return result;
             };
 
+            // Lets the 항목 체크 화면borrow another class's checklist items
+            // (e.g. reuse the same 수행평가 rubric across parallel classes)
+            // without touching that other class's own checked marks.
+            const fetchAllChecklists = async () => {
+                const result = {};
+                for (const code of classCodes) {
+                    if (code === classCode) continue;
+                    try {
+                        if (db) {
+                            const snap = await db.collection('classes').doc(code).get();
+                            result[code] = snap.exists ? (snap.data().checklists || []) : [];
+                        } else {
+                            const raw = localStorage.getItem(`sga_data_${code}`);
+                            result[code] = raw ? (JSON.parse(raw).checklists || []) : [];
+                        }
+                    } catch (e) {
+                        result[code] = [];
+                    }
+                }
+                return result;
+            };
+
             const applyLessonToAllClasses = async ({ lesson, content, detail, date, completed }) => {
                 let count = 0;
                 for (const code of classCodes) {
@@ -4032,7 +4211,7 @@ service cloud.firestore {
                             {activeTab === 'classroom' && <ClassroomTab data={data} updateData={updateData} onGroupClick={goToGroupRecord} />}
                             {activeTab === 'roster' && <RosterTab data={data} updateData={updateData} google={{ ...google, clientId: googleClientId }} bulkCreateClasses={bulkCreateClasses} />}
                             {activeTab === 'progress' && <ProgressTab data={data} updateData={updateData} classCode={classCode} classCodes={classCodes} fetchAllProgress={fetchAllProgress} applyLessonToAllClasses={applyLessonToAllClasses} timetable={timetable} noSchoolDates={noSchoolDates} />}
-                            {activeTab === 'record' && <RecordTab data={data} updateData={updateData} focusGroupId={focusGroupId} onFocusHandled={() => setFocusGroupId(null)} />}
+                            {activeTab === 'record' && <RecordTab data={data} updateData={updateData} focusGroupId={focusGroupId} onFocusHandled={() => setFocusGroupId(null)} classCodes={classCodes} fetchAllChecklists={fetchAllChecklists} />}
                             {activeTab === 'settings' && (
                                 <SettingsTab
                                     classCode={classCode}
