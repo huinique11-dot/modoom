@@ -2340,22 +2340,22 @@
                             {checklist.items.length === 0 ? (
                                 <p className="text-sm text-slate-400">아직 평가 항목이 없습니다. 위에서 추가해주세요.</p>
                             ) : (
-                                <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                                <div className="overflow-auto max-h-[65vh] border border-slate-200 rounded-xl">
                                     <table className="min-w-full text-sm border-collapse">
                                         <thead>
                                             <tr>
-                                                <th className="px-3 py-2 text-left sticky left-0 bg-white border-b border-slate-200"></th>
+                                                <th className="px-3 py-2 text-left sticky top-0 left-0 z-20 bg-white border-b border-slate-200"></th>
                                                 {checklist.items.map((item, idx) => {
                                                     const pal = paletteFor(idx);
                                                     return (
-                                                        <th key={item.id} className={`px-2 py-2 text-center border-b border-slate-200 ${pal.bg}`}>
+                                                        <th key={item.id} className={`px-2 py-2 text-center sticky top-0 z-10 border-b border-slate-200 ${pal.bg}`}>
                                                             <div className={`text-lg font-bold ${pal.text}`}>{countFor(item.id)}</div>
                                                             <div className="text-xs font-medium text-slate-600 whitespace-nowrap">{item.label}</div>
                                                             {!checklist.completed && <button onClick={() => removeItem(item.id)} className="text-[10px] text-slate-400 hover:text-rose-500">삭제</button>}
                                                         </th>
                                                     );
                                                 })}
-                                                <th className="px-2 py-2 text-center border-b border-slate-200 bg-slate-50 text-slate-500">점수</th>
+                                                <th className="px-2 py-2 text-center sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-slate-500">점수</th>
                                             </tr>
                                         </thead>
                                         <tbody>
