@@ -2249,8 +2249,11 @@
             // 가장 최근 모둠 배정 기준으로 묶어서 보여준다 (RosterTab의
             // "모둠별 정렬"과 같은 규칙: 배정 안 된 학생은 맨 뒤 '미배정'으로).
             const latestRound = data.rounds && data.rounds[0];
+            // 기본은 모둠별 보기지만, 번호대로 쭉 확인하고 싶을 때도 있어서
+            // 번호순 보기로 전환할 수 있게 한다.
+            const [viewMode, setViewMode] = useState('group'); // 'group' | 'number'
             const groupedStudents = useMemo(() => {
-                if (!latestRound) return [{ groupName: null, groupIdx: -1, students }];
+                if (viewMode === 'number' || !latestRound) return [{ groupName: null, groupIdx: -1, students }];
                 const byId = {};
                 students.forEach(s => { byId[s.id] = s; });
                 const clusters = latestRound.groups.map((g, gi) => ({
@@ -2261,7 +2264,7 @@
                 const unassigned = students.filter(s => !assignedIds.has(s.id));
                 if (unassigned.length) clusters.push({ groupName: '미배정', groupIdx: -1, students: unassigned });
                 return clusters;
-            }, [latestRound, students]);
+            }, [latestRound, students, viewMode]);
             const [checklistId, setChecklistId] = useState(checklists[0]?.id || '');
             useEffect(() => {
                 if (!checklists.find(c => c.id === checklistId)) setChecklistId(checklists[0]?.id || '');
@@ -2391,6 +2394,27 @@
 
             const countFor = (itemId) => checklist ? Object.values(checklist.marks).filter(m => m && m[itemId]).length : 0;
 
+            // 항목 하나를 전체 학생에게 반대로 체크해야 할 때(예: 체크 의미를
+            // 반대로 이해해서 다 잘못 눌렀을 때) 하나씩 다시 누르지 않고
+            // 한 번에 뒤집을 수 있게 한다. 결석 학생은 점수에 반영되지
+            // 않으니 건드리지 않는다.
+            const invertColumn = (itemId) => {
+                if (!checklist) return;
+                updateData(prev => ({
+                    ...prev,
+                    checklists: (prev.checklists || []).map(c => {
+                        if (c.id !== checklist.id) return c;
+                        const nextMarks = { ...c.marks };
+                        students.forEach(s => {
+                            if (c.absent && c.absent[s.id]) return;
+                            const current = nextMarks[s.id] || {};
+                            nextMarks[s.id] = { ...current, [itemId]: !current[itemId] };
+                        });
+                        return { ...c, marks: nextMarks };
+                    }),
+                }));
+            };
+
             // 이름을 누르면 그 학생의 모든 항목을 한 번에 체크(이미 전부
             // 체크돼 있으면 반대로 전부 해제)한다 — 예를 들어 가점 방식에서
             // 만점인 학생을 항목 하나하나 누를 필요 없이 빠르게 처리할 수 있다.
@@ -2419,6 +2443,20 @@
                     checklists: (prev.checklists || []).map(c => c.id !== checklist.id ? c : {
                         ...c,
                         absent: { ...(c.absent || {}), [studentId]: !(c.absent && c.absent[studentId]) },
+                    }),
+                }));
+            };
+
+            // 연주/발표 같은 실시간 평가는 학생마다 끝나는 시점이 달라서,
+            // 체크리스트 전체를 잠그지 않고도 이미 평가가 끝난 학생의 줄만
+            // 먼저 잠글 수 있게 한다. 다시 누르면 언제든 풀 수 있다.
+            const toggleStudentCompleted = (studentId) => {
+                if (!checklist) return;
+                updateData(prev => ({
+                    ...prev,
+                    checklists: (prev.checklists || []).map(c => c.id !== checklist.id ? c : {
+                        ...c,
+                        completedStudents: { ...(c.completedStudents || {}), [studentId]: !(c.completedStudents && c.completedStudents[studentId]) },
                     }),
                 }));
             };
@@ -2517,7 +2555,17 @@
                                         }))} />
                                 </div>
                             )}
-                            {latestRound && <p className="text-[11px] text-slate-400 mb-2">가장 최근 모둠 배정(&apos;{latestRound.name}&apos;) 기준으로 모둠별로 묶어서 보여줘요. 체크 안 하면 {scoreMode === 'deduct' ? '만점' : '기본점수'}({maxScore}점)이에요.</p>}
+                            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                                {latestRound ? (
+                                    <p className="text-[11px] text-slate-400">가장 최근 모둠 배정(&apos;{latestRound.name}&apos;) 기준으로 {viewMode === 'group' ? '모둠별로 묶어서' : '번호순으로'} 보여줘요. 체크 안 하면 {scoreMode === 'deduct' ? '만점' : '기본점수'}({maxScore}점)이에요.</p>
+                                ) : <span />}
+                                {latestRound && (
+                                    <div className="flex bg-slate-100 rounded-lg p-0.5 text-[11px] font-medium shrink-0">
+                                        <button onClick={() => setViewMode('group')} className={`px-2 py-1 rounded-md ${viewMode === 'group' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-500'}`}>모둠별</button>
+                                        <button onClick={() => setViewMode('number')} className={`px-2 py-1 rounded-md ${viewMode === 'number' ? 'bg-white text-indigo-600 shadow-sm font-bold' : 'text-slate-500'}`}>번호순</button>
+                                    </div>
+                                )}
+                            </div>
 
                             {checklist.items.length === 0 ? (
                                 <p className="text-sm text-slate-400">아직 평가 항목이 없습니다. 위에서 추가해주세요.</p>
@@ -2548,7 +2596,12 @@
                                                                     <span>점</span>
                                                                 </div>
                                                             )}
-                                                            {!checklist.completed && <button onClick={() => removeItem(item.id)} className="text-[10px] text-slate-400 hover:text-rose-500">삭제</button>}
+                                                            {!checklist.completed && (
+                                                                <div className="flex items-center justify-center gap-2">
+                                                                    <button onClick={() => invertColumn(item.id)} title="이 항목의 체크를 전체 학생 기준으로 반대로 뒤집어요" className="text-[10px] text-slate-400 hover:text-indigo-600">반전</button>
+                                                                    <button onClick={() => removeItem(item.id)} className="text-[10px] text-slate-400 hover:text-rose-500">삭제</button>
+                                                                </div>
+                                                            )}
                                                         </th>
                                                     );
                                                 })}
@@ -2568,17 +2621,23 @@
                                                     )}
                                                     {cluster.students.map(s => {
                                                         const isAbsent = !!(checklist.absent && checklist.absent[s.id]);
+                                                        const isStudentCompleted = !!(checklist.completedStudents && checklist.completedStudents[s.id]);
+                                                        const rowLocked = isAbsent || checklist.completed || isStudentCompleted;
                                                         return (
-                                                        <tr key={s.id} className={`border-b border-slate-100 last:border-0 ${isAbsent ? 'opacity-40' : ''}`}>
+                                                        <tr key={s.id} className={`border-b border-slate-100 last:border-0 ${isAbsent ? 'opacity-40' : isStudentCompleted ? 'bg-emerald-50/60' : ''}`}>
                                                             <td className="px-3 py-1.5 whitespace-nowrap sticky left-0 bg-white font-medium text-slate-700">
                                                                 <div className="flex items-center gap-1.5">
-                                                                    <button onClick={() => toggleAllForStudent(s.id)} disabled={isAbsent || checklist.completed}
-                                                                        title="이름을 누르면 전체 항목이 한 번에 체크돼요" className={`hover:underline ${(isAbsent || checklist.completed) ? 'cursor-not-allowed' : ''}`}>
+                                                                    <button onClick={() => toggleAllForStudent(s.id)} disabled={rowLocked}
+                                                                        title="이름을 누르면 전체 항목이 한 번에 체크돼요" className={`hover:underline ${rowLocked ? 'cursor-not-allowed' : ''}`}>
                                                                         {s.number ? `${s.number} ` : ''}{s.name}
                                                                     </button>
                                                                     <button onClick={() => toggleAbsent(s.id)} disabled={checklist.completed}
                                                                         className={`text-[10px] px-1.5 py-0.5 rounded-full border font-bold shrink-0 ${isAbsent ? 'bg-rose-500 border-rose-500 text-white' : 'border-slate-200 text-slate-400 hover:bg-slate-50'} ${checklist.completed ? 'cursor-not-allowed' : ''}`}>
                                                                         결석
+                                                                    </button>
+                                                                    <button onClick={() => toggleStudentCompleted(s.id)} disabled={checklist.completed || isAbsent}
+                                                                        title="이 학생의 평가가 끝나면 눌러서 줄을 잠가요" className={`text-[10px] px-1.5 py-0.5 rounded-full border font-bold shrink-0 ${isStudentCompleted ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-200 text-slate-400 hover:bg-slate-50'} ${(checklist.completed || isAbsent) ? 'cursor-not-allowed' : ''}`}>
+                                                                        완료
                                                                     </button>
                                                                 </div>
                                                             </td>
@@ -2587,8 +2646,8 @@
                                                                 const checked = !!(checklist.marks[s.id] && checklist.marks[s.id][item.id]);
                                                                 return (
                                                                     <td key={item.id} className="p-1 text-center">
-                                                                        <button onClick={() => toggleMark(s.id, item.id)} disabled={isAbsent || checklist.completed}
-                                                                            className={`w-11 h-11 rounded-lg border-2 flex items-center justify-center text-lg font-bold transition-colors ${(isAbsent || checklist.completed) ? 'cursor-not-allowed' : ''} ${checked ? `${pal.dot} border-transparent text-white` : 'bg-slate-50 border-slate-200 text-transparent hover:bg-slate-100'}`}>
+                                                                        <button onClick={() => toggleMark(s.id, item.id)} disabled={rowLocked}
+                                                                            className={`w-11 h-11 rounded-lg border-2 flex items-center justify-center text-lg font-bold transition-colors ${rowLocked ? 'cursor-not-allowed' : ''} ${checked ? `${pal.dot} border-transparent text-white` : 'bg-slate-50 border-slate-200 text-transparent hover:bg-slate-100'}`}>
                                                                             ✓
                                                                         </button>
                                                                     </td>
