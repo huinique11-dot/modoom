@@ -2734,6 +2734,13 @@
             return [...list].sort((a, b) => {
                 const na = parseFloat(a.lesson), nb = parseFloat(b.lesson);
                 if (!isNaN(na) && !isNaN(nb) && na !== nb) return na - nb;
+                // 휴강으로 차시 번호가 비어있는 항목은 날짜를 기준으로 제자리에
+                // 들어가게 한다 (그냥 문자열로 비교하면 빈 문자열이 항상 맨
+                // 앞으로 가버린다).
+                if (isNaN(na) || isNaN(nb)) {
+                    const da = a.date || '', db = b.date || '';
+                    if (da && db && da !== db) return da < db ? -1 : 1;
+                }
                 return (a.lesson || '').localeCompare(b.lesson || '', 'ko');
             });
         }
@@ -2916,6 +2923,52 @@
                 updateData(prev => ({ ...prev, progress: (prev.progress || []).map(x => x.id === p.id ? { ...x, completed: !(x.completed !== false), updatedAt: Date.now() } : x) }));
             };
 
+            // 한꺼번에 만들어둔 차시 중 실제로 휴강(학교 행사, 재량휴업 등으로
+            // 그날 수업이 아예 없었던 경우)이 생기면, 그 차시를 지우는 대신
+            // '휴강'으로 표시만 하고(날짜 기록은 남겨두고) 그 뒤 차시 번호를
+            // 전부 한 칸씩 당겨서 번호가 계속 이어지게 한다. 원래 번호는
+            // cancelledLesson에 남겨뒀다가, 휴강을 해제하면 그 번호 그대로
+            // 되돌리고 뒤 번호들을 다시 한 칸씩 밀어낸다.
+            const toggleCancelled = (p) => {
+                updateData(prev => {
+                    const list = prev.progress || [];
+                    const target = list.find(x => x.id === p.id);
+                    if (!target) return prev;
+                    if (!target.cancelled) {
+                        const n = parseFloat(target.lesson);
+                        const hasNumber = !isNaN(n) && Number.isInteger(n);
+                        return {
+                            ...prev,
+                            progress: list.map(x => {
+                                if (x.id === target.id) {
+                                    return { ...x, cancelled: true, cancelledLesson: hasNumber ? target.lesson : '', lesson: '', updatedAt: Date.now() };
+                                }
+                                const xn = parseFloat(x.lesson);
+                                if (hasNumber && !isNaN(xn) && Number.isInteger(xn) && xn > n) {
+                                    return { ...x, lesson: String(xn - 1), updatedAt: Date.now() };
+                                }
+                                return x;
+                            }),
+                        };
+                    }
+                    const restored = parseFloat(target.cancelledLesson);
+                    const hasRestored = !isNaN(restored) && Number.isInteger(restored);
+                    return {
+                        ...prev,
+                        progress: list.map(x => {
+                            if (x.id === target.id) {
+                                return { ...x, cancelled: false, cancelledLesson: '', lesson: hasRestored ? target.cancelledLesson : x.lesson, updatedAt: Date.now() };
+                            }
+                            const xn = parseFloat(x.lesson);
+                            if (hasRestored && !isNaN(xn) && Number.isInteger(xn) && xn >= restored) {
+                                return { ...x, lesson: String(xn + 1), updatedAt: Date.now() };
+                            }
+                            return x;
+                        }),
+                    };
+                });
+            };
+
             const [genForm, setGenForm] = useState({ start: todayStr(), end: todayStr() });
             const [genMsg, setGenMsg] = useState('');
             const generateLessons = () => {
@@ -2991,7 +3044,7 @@
             const allLessons = useMemo(() => {
                 if (!compareData) return [];
                 const set = new Set();
-                Object.values(compareData).forEach(list => (list || []).forEach(p => set.add(p.lesson)));
+                Object.values(compareData).forEach(list => (list || []).forEach(p => { if (p.lesson) set.add(p.lesson); }));
                 return sortLessons([...set].map(lesson => ({ lesson }))).map(x => x.lesson);
             }, [compareData]);
 
@@ -3049,25 +3102,36 @@
                             <div className="space-y-2">
                                 {sorted.map(p => {
                                     const isCompleted = p.completed !== false;
+                                    const isCancelled = !!p.cancelled;
                                     return (
-                                    <div key={p.id} className={`border rounded-xl p-3 ${isCompleted ? 'border-slate-200' : 'border-dashed border-amber-300 bg-amber-50/40'}`}>
+                                    <div key={p.id} className={`border rounded-xl p-3 ${isCancelled ? 'border-slate-200 bg-slate-50 opacity-60' : isCompleted ? 'border-slate-200' : 'border-dashed border-amber-300 bg-amber-50/40'}`}>
                                         <div className="flex items-start justify-between gap-2">
                                             <div className="flex items-start gap-2 min-w-0">
-                                                <input type="checkbox" checked={isCompleted} onChange={() => toggleCompleted(p)}
-                                                    title="완료 체크" className="mt-1 w-4 h-4 shrink-0 accent-indigo-600" />
-                                                <div className="min-w-0 cursor-pointer" onClick={() => openDetail(p)}>
-                                                    <span className="text-xs font-bold text-indigo-600">{p.lesson}차시</span>
+                                                {!isCancelled && <input type="checkbox" checked={isCompleted} onChange={() => toggleCompleted(p)}
+                                                    title="완료 체크" className="mt-1 w-4 h-4 shrink-0 accent-indigo-600" />}
+                                                <div className={`min-w-0 ${isCancelled ? '' : 'cursor-pointer'}`} onClick={() => !isCancelled && openDetail(p)}>
+                                                    {isCancelled ? (
+                                                        <span className="text-xs font-bold text-slate-400">🚫 휴강</span>
+                                                    ) : (
+                                                        <span className="text-xs font-bold text-indigo-600">{p.lesson}차시</span>
+                                                    )}
                                                     {(p.date || dateFromTimestamp(p.updatedAt)) && <span className="text-[11px] text-slate-400 ml-1.5">{p.date || dateFromTimestamp(p.updatedAt)}</span>}
-                                                    {!isCompleted && <span className="text-[11px] text-amber-600 font-bold ml-1.5">📌 예정</span>}
-                                                    <p className="text-sm text-slate-700 whitespace-pre-wrap break-words mt-0.5">{p.content || <span className="text-slate-300">내용 없음</span>}</p>
-                                                    {p.detail && expandedLessonId !== p.id && (
+                                                    {!isCancelled && !isCompleted && <span className="text-[11px] text-amber-600 font-bold ml-1.5">📌 예정</span>}
+                                                    {!isCancelled && (
+                                                        <p className="text-sm text-slate-700 whitespace-pre-wrap break-words mt-0.5">{p.content || <span className="text-slate-300">내용 없음</span>}</p>
+                                                    )}
+                                                    {!isCancelled && p.detail && expandedLessonId !== p.id && (
                                                         <p className="text-xs text-slate-400 mt-1 truncate">📝 {p.detail}</p>
                                                     )}
                                                 </div>
                                             </div>
                                             <div className="flex gap-1 shrink-0">
-                                                <button onClick={() => applyToAll(p)} className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">🔁 전체 적용</button>
-                                                <button onClick={() => startEdit(p)} className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">수정</button>
+                                                {!isCancelled && <button onClick={() => applyToAll(p)} className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">🔁 전체 적용</button>}
+                                                {!isCancelled && <button onClick={() => startEdit(p)} className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">수정</button>}
+                                                <button onClick={() => toggleCancelled(p)} title={isCancelled ? '휴강을 해제하고 차시 번호를 되돌려요' : '이 날은 휴강 처리하고, 다음 차시 번호를 한 칸씩 당겨요'}
+                                                    className={`text-xs px-2 py-1 rounded-lg border font-medium ${isCancelled ? 'bg-slate-500 border-slate-500 text-white hover:bg-slate-600' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                                                    {isCancelled ? '휴강 해제' : '휴강'}
+                                                </button>
                                                 <button onClick={() => remove(p.id)} className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-rose-500 hover:bg-rose-50">삭제</button>
                                             </div>
                                         </div>
