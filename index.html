@@ -429,6 +429,9 @@
             }
             return dates;
         }
+        function addDaysStr(dateStr, n) {
+            return formatDateStr(new Date(parseDateStr(dateStr).getTime() + n * 86400000));
+        }
         const KOREAN_WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
         const weekdayKorean = (dateStr) => KOREAN_WEEKDAYS[parseDateStr(dateStr).getUTCDay()];
         const isNoSchoolDate = (dateStr, ranges) => (ranges || []).some(r => dateStr >= r.start && dateStr <= r.end);
@@ -2873,7 +2876,7 @@
             );
         }
 
-        function ProgressTab({ data, updateData, classCode, classCodes, fetchAllProgress, applyLessonToAllClasses, timetable, noSchoolDates }) {
+        function ProgressTab({ data, updateData, classCode, classCodes, fetchAllProgress, applyLessonToAllClasses, mergeProgressContent, timetable, noSchoolDates }) {
             const [mode, setMode] = useState('mine');
             const [form, setForm] = useState({ lesson: '', content: '', date: todayStr() });
             const [editingId, setEditingId] = useState(null);
@@ -3041,6 +3044,45 @@
                 if (mode === 'compare' || mode === 'byContent') loadCompare();
             }, [mode]);
 
+            const [selectedContents, setSelectedContents] = useState(new Set());
+            const [mergeLabel, setMergeLabel] = useState('');
+            const [mergeBusy, setMergeBusy] = useState(false);
+            const [mergeMsg, setMergeMsg] = useState('');
+            const toggleContentSelected = (content) => {
+                setSelectedContents(prev => {
+                    const next = new Set(prev);
+                    if (next.has(content)) next.delete(content); else next.add(content);
+                    return next;
+                });
+            };
+            const doRenameGroup = async (g, newText) => {
+                const trimmed = newText.trim();
+                if (!trimmed || trimmed === g.content) return;
+                const targets = Object.entries(g.byClass).flatMap(([code, entries]) => entries.map(e => ({ code, id: e.id })));
+                await mergeProgressContent(targets, trimmed);
+                await loadCompare();
+            };
+
+            const doMerge = async () => {
+                if (!mergeLabel.trim() || !selectedContents.size) return;
+                setMergeBusy(true);
+                const targets = byContentGroups
+                    .filter(g => selectedContents.has(g.content))
+                    .flatMap(g => Object.entries(g.byClass).flatMap(([code, entries]) => entries.map(e => ({ code, id: e.id }))));
+                const count = await mergeProgressContent(targets, mergeLabel.trim());
+                setMergeBusy(false);
+                setMergeMsg(`${count}개 기록을 '${mergeLabel.trim()}'(으)로 합쳤습니다.`);
+                setSelectedContents(new Set());
+                setMergeLabel('');
+                await loadCompare();
+                setTimeout(() => setMergeMsg(''), 3000);
+            };
+
+            useEffect(() => {
+                if (selectedContents.size === 0) { setMergeLabel(''); return; }
+                setMergeLabel(prev => prev || [...selectedContents][0]);
+            }, [selectedContents]);
+
             const allLessons = useMemo(() => {
                 if (!compareData) return [];
                 const set = new Set();
@@ -3061,13 +3103,21 @@
                         const key = (p.content || '').trim();
                         if (!key) return;
                         if (!map.has(key)) map.set(key, { content: key, byClass: {} });
-                        map.get(key).byClass[code] = { lesson: p.lesson, date: p.date || dateFromTimestamp(p.updatedAt) || '' };
+                        const byClass = map.get(key).byClass;
+                        if (!byClass[code]) byClass[code] = [];
+                        // 같은 반이 같은 내용을 두 차시 이상에 나눠 적었을 수도
+                        // 있으니(특히 합치기 직후), 반마다 하나만 남기지 않고
+                        // 전부 모아둔다.
+                        byClass[code].push({ id: p.id, lesson: p.lesson, date: p.date || dateFromTimestamp(p.updatedAt) || '' });
                     });
                 });
                 const groups = [...map.values()];
+                groups.forEach(g => {
+                    Object.values(g.byClass).forEach(entries => entries.sort((a, b) => (a.date || '').localeCompare(b.date || '')));
+                });
                 groups.sort((a, b) => {
-                    const datesA = Object.values(a.byClass).map(x => x.date).filter(Boolean).sort();
-                    const datesB = Object.values(b.byClass).map(x => x.date).filter(Boolean).sort();
+                    const datesA = Object.values(a.byClass).flat().map(x => x.date).filter(Boolean).sort();
+                    const datesB = Object.values(b.byClass).flat().map(x => x.date).filter(Boolean).sort();
                     if (datesA[0] && datesB[0] && datesA[0] !== datesB[0]) return datesA[0] < datesB[0] ? -1 : 1;
                     return 0;
                 });
@@ -3254,9 +3304,18 @@
                     {mode === 'byContent' && (
                         <div>
                             <div className="flex items-center justify-between mb-2 gap-2">
-                                <p className="text-xs text-slate-500">반마다 휴강으로 차시 번호가 달라져도 흔들리지 않게, 차시 번호 대신 진도(내용)를 기준으로 묶어서 반마다 언제·몇 차시에 나갔는지 봐요.</p>
+                                <p className="text-xs text-slate-500">반마다 휴강으로 차시 번호가 달라져도 흔들리지 않게, 차시 번호 대신 진도(내용)를 기준으로 묶어서 반마다 언제·몇 차시에 나갔는지 봐요. 진도 이름을 눌러 바로 고칠 수 있고, 같은 수업인데 여러 줄로 흩어졌다면 체크해서 하나로 합쳐보세요.</p>
                                 <button onClick={loadCompare} disabled={loadingCompare} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 font-bold text-indigo-600 hover:bg-indigo-50 shrink-0">{loadingCompare ? '불러오는 중...' : '↻ 새로고침'}</button>
                             </div>
+                            {selectedContents.size > 0 && (
+                                <div className="flex flex-wrap items-center gap-2 mb-2 p-2 bg-indigo-50 border border-indigo-200 rounded-lg">
+                                    <span className="text-xs font-bold text-indigo-700 shrink-0">{selectedContents.size}개 선택됨 →</span>
+                                    <input value={mergeLabel} onChange={e => setMergeLabel(e.target.value)} placeholder="합칠 진도 이름" className="flex-1 min-w-[140px] border rounded-lg px-2 py-1.5 text-sm" />
+                                    <button onClick={doMerge} disabled={mergeBusy || !mergeLabel.trim()} className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold hover:bg-indigo-700 disabled:opacity-50">{mergeBusy ? '합치는 중...' : '합치기'}</button>
+                                    <button onClick={() => setSelectedContents(new Set())} className="text-xs px-2 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">선택 취소</button>
+                                </div>
+                            )}
+                            {mergeMsg && <p className="text-xs text-emerald-600 mb-2">{mergeMsg}</p>}
                             {compareData && byContentGroups.length > 0 ? (
                                 <div className="overflow-x-auto border border-slate-200 rounded-xl">
                                     <table className="min-w-full text-xs">
@@ -3269,26 +3328,36 @@
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {byContentGroups.map((g, i) => (
-                                                <tr key={i} className="border-t border-slate-100">
-                                                    <td className="px-3 py-2 max-w-[16rem] font-medium text-slate-700 sticky left-0 bg-white" title={g.content}>
-                                                        <div className="truncate">{g.content}</div>
+                                            {byContentGroups.map((g, i) => {
+                                                const isSelected = selectedContents.has(g.content);
+                                                return (
+                                                <tr key={i} className={`border-t border-slate-100 ${isSelected ? 'bg-indigo-50/40' : ''}`}>
+                                                    <td className={`px-3 py-2 max-w-[16rem] font-medium text-slate-700 sticky left-0 ${isSelected ? 'bg-indigo-50' : 'bg-white'}`}>
+                                                        <div className="flex items-center gap-1.5">
+                                                            <input type="checkbox" checked={isSelected} onChange={() => toggleContentSelected(g.content)} className="w-3.5 h-3.5 accent-indigo-600 shrink-0" />
+                                                            <InlineEditText value={g.content} onChange={text => doRenameGroup(g, text)} title="눌러서 이 진도 이름을 바로 고쳐요" className="truncate max-w-[13rem]" />
+                                                        </div>
                                                     </td>
                                                     {classCodes.map(code => {
-                                                        const e = g.byClass[code];
+                                                        const entries = g.byClass[code];
                                                         return (
                                                             <td key={code} className="px-3 py-2 whitespace-nowrap text-slate-600">
-                                                                {e ? (
-                                                                    <span>
-                                                                        {e.date && <span className="text-[10px] text-slate-400 mr-1">{e.date}</span>}
-                                                                        {e.lesson && <span className="font-bold text-indigo-600">{e.lesson}차시</span>}
-                                                                    </span>
+                                                                {entries && entries.length ? (
+                                                                    <div className="flex flex-col gap-0.5">
+                                                                        {entries.map(e => (
+                                                                            <span key={e.id}>
+                                                                                {e.date && <span className="text-[10px] text-slate-400 mr-1">{e.date}</span>}
+                                                                                {e.lesson && <span className="font-bold text-indigo-600">{e.lesson}차시</span>}
+                                                                            </span>
+                                                                        ))}
+                                                                    </div>
                                                                 ) : <span className="text-slate-200">—</span>}
                                                             </td>
                                                         );
                                                     })}
                                                 </tr>
-                                            ))}
+                                                );
+                                            })}
                                         </tbody>
                                     </table>
                                 </div>
@@ -3508,6 +3577,77 @@
             );
         }
 
+        // 달력에서 날짜 하나를 눌러 수업 없는 날을 토글한다. 그 날이 아직
+        // 어느 기간에도 안 걸쳐 있으면 하루짜리 기간으로 새로 추가하고,
+        // 이미 걸쳐 있으면(하루짜리든 여러 날짜 기간의 일부든) 그 기간에서
+        // 이 날짜만 빼낸다 — 양 끝이면 기간을 줄이고, 중간이면 둘로
+        // 쪼갠다.
+        function toggleNoSchoolDay(dayStr, dates, onAdd, onRemove) {
+            const covering = dates.filter(r => dayStr >= r.start && dayStr <= r.end);
+            if (!covering.length) {
+                onAdd(dayStr, dayStr, '');
+                return;
+            }
+            covering.forEach(r => {
+                onRemove(r.id);
+                if (r.start === dayStr && r.end === dayStr) return;
+                if (r.start === dayStr) {
+                    onAdd(addDaysStr(dayStr, 1), r.end, r.label);
+                } else if (r.end === dayStr) {
+                    onAdd(r.start, addDaysStr(dayStr, -1), r.label);
+                } else {
+                    onAdd(r.start, addDaysStr(dayStr, -1), r.label);
+                    onAdd(addDaysStr(dayStr, 1), r.end, r.label);
+                }
+            });
+        }
+
+        function NoSchoolCalendar({ dates, onAdd, onRemove }) {
+            const [cursor, setCursor] = useState(() => {
+                const t = parseDateStr(todayStr());
+                return { y: t.getUTCFullYear(), m: t.getUTCMonth() };
+            });
+            const shiftMonth = (delta) => setCursor(({ y, m }) => {
+                const d = new Date(Date.UTC(y, m + delta, 1));
+                return { y: d.getUTCFullYear(), m: d.getUTCMonth() };
+            });
+            const firstOfMonth = new Date(Date.UTC(cursor.y, cursor.m, 1));
+            const daysInMonth = new Date(Date.UTC(cursor.y, cursor.m + 1, 0)).getUTCDate();
+            const leadingBlanks = firstOfMonth.getUTCDay();
+            const cells = [];
+            for (let i = 0; i < leadingBlanks; i++) cells.push(null);
+            for (let d = 1; d <= daysInMonth; d++) cells.push(formatDateStr(new Date(Date.UTC(cursor.y, cursor.m, d))));
+            const todayS = todayStr();
+            return (
+                <div>
+                    <div className="flex items-center justify-between mb-2">
+                        <button type="button" onClick={() => shiftMonth(-1)} className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">‹</button>
+                        <span className="text-sm font-bold text-slate-700">{cursor.y}년 {cursor.m + 1}월</span>
+                        <button type="button" onClick={() => shiftMonth(1)} className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">›</button>
+                    </div>
+                    <div className="grid grid-cols-7 gap-1 text-center">
+                        {KOREAN_WEEKDAYS.map(d => (
+                            <div key={d} className={`text-[11px] font-bold py-1 ${d === '일' || d === '토' ? 'text-rose-400' : 'text-slate-400'}`}>{d}</div>
+                        ))}
+                        {cells.map((dayStr, i) => {
+                            if (!dayStr) return <div key={i} />;
+                            const isOff = isNoSchoolDate(dayStr, dates);
+                            const isToday = dayStr === todayS;
+                            const dayNum = parseInt(dayStr.slice(-2), 10);
+                            return (
+                                <button key={dayStr} type="button" onClick={() => toggleNoSchoolDay(dayStr, dates, onAdd, onRemove)}
+                                    title={dayStr}
+                                    className={`h-9 rounded-lg text-xs font-medium transition-colors ${isOff ? 'bg-rose-500 text-white font-bold hover:bg-rose-600' : 'bg-slate-50 text-slate-600 hover:bg-indigo-50'} ${isToday && !isOff ? 'ring-2 ring-indigo-300' : ''}`}>
+                                    {dayNum}
+                                </button>
+                            );
+                        })}
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-2">날짜를 누르면 수업 없는 날로 바로 체크/해제돼요 (빨간 칸 = 수업 없음).</p>
+                </div>
+            );
+        }
+
         function NoSchoolDatesEditor({ dates, onAdd, onRemove }) {
             const [form, setForm] = useState({ start: todayStr(), end: todayStr(), label: '' });
             const add = () => {
@@ -3517,14 +3657,20 @@
             };
             return (
                 <div>
-                    <div className="flex flex-wrap gap-2 items-center mb-3">
-                        <input type="date" value={form.start} onChange={e => setForm({ ...form, start: e.target.value })} className="border rounded-lg px-2 py-1.5 text-sm" />
-                        <span className="text-xs text-slate-400">~</span>
-                        <input type="date" value={form.end} onChange={e => setForm({ ...form, end: e.target.value })} className="border rounded-lg px-2 py-1.5 text-sm" />
-                        <input value={form.label} onChange={e => setForm({ ...form, label: e.target.value })} placeholder="예: 여름방학 (선택)" className="border rounded-lg px-2 py-1.5 text-sm flex-1 min-w-[120px]" />
-                        <button onClick={add} className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold hover:bg-indigo-700">+ 추가</button>
-                    </div>
-                    <div className="space-y-1.5">
+                    <NoSchoolCalendar dates={dates} onAdd={onAdd} onRemove={onRemove} />
+                    <details className="border border-slate-200 rounded-xl p-3 mt-4 bg-slate-50">
+                        <summary className="text-xs font-bold text-slate-600 cursor-pointer select-none">📅 방학처럼 긴 기간은 날짜 범위로 한번에 등록하기</summary>
+                        <div className="mt-2">
+                            <div className="flex flex-wrap gap-2 items-center mb-3">
+                                <input type="date" value={form.start} onChange={e => setForm({ ...form, start: e.target.value })} className="border rounded-lg px-2 py-1.5 text-sm bg-white" />
+                                <span className="text-xs text-slate-400">~</span>
+                                <input type="date" value={form.end} onChange={e => setForm({ ...form, end: e.target.value })} className="border rounded-lg px-2 py-1.5 text-sm bg-white" />
+                                <input value={form.label} onChange={e => setForm({ ...form, label: e.target.value })} placeholder="예: 여름방학 (선택)" className="border rounded-lg px-2 py-1.5 text-sm flex-1 min-w-[120px] bg-white" />
+                                <button onClick={add} className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-bold hover:bg-indigo-700">+ 추가</button>
+                            </div>
+                        </div>
+                    </details>
+                    <div className="space-y-1.5 mt-3">
                         {dates.length === 0 && <p className="text-xs text-slate-400">등록된 날이 없습니다.</p>}
                         {dates.map(r => (
                             <div key={r.id} className="flex items-center justify-between bg-slate-50 border border-slate-100 rounded-lg px-3 py-1.5 text-xs">
@@ -4386,6 +4532,45 @@ service cloud.firestore {
                 return count;
             };
 
+            // 같은 수업인데 반마다(또는 차시마다) 내용을 다르게 적어서
+            // "진도별 보기"에서 같은 진도가 여러 줄로 흩어져 보일 때, 그
+            // 줄들을 골라 하나의 이름으로 합친다. targets는 어느 반의 어느
+            // 기록(id)을 바꿀지 정확히 짚어주는 목록이라, 그 기록들의
+            // content만 새 이름으로 바꿔 쓴다.
+            const mergeProgressContent = async (targets, newContent) => {
+                const byCode = {};
+                targets.forEach(t => { (byCode[t.code] = byCode[t.code] || []).push(t.id); });
+                const rewrite = (ids) => (list) => (list || []).map(p => ids.has(p.id) ? { ...p, content: newContent, updatedAt: Date.now() } : p);
+                let count = 0;
+                for (const code of Object.keys(byCode)) {
+                    const ids = new Set(byCode[code]);
+                    const apply = rewrite(ids);
+                    if (code === classCode) {
+                        if (db) {
+                            await transactionalWrite(db.collection('classes').doc(code), prev => ({ ...prev, progress: apply(prev.progress) }));
+                        } else {
+                            updateData(prev => ({ ...prev, progress: apply(prev.progress) }));
+                        }
+                        count += ids.size;
+                        continue;
+                    }
+                    try {
+                        if (db) {
+                            await transactionalWrite(db.collection('classes').doc(code), base => ({ ...base, progress: apply(base.progress) }));
+                        } else {
+                            const raw = localStorage.getItem(`sga_data_${code}`);
+                            const base = raw ? { ...DEFAULT_DATA, ...JSON.parse(raw) } : DEFAULT_DATA;
+                            const next = { ...base, progress: apply(base.progress) };
+                            localStorage.setItem(`sga_data_${code}`, JSON.stringify(next));
+                        }
+                        count += ids.size;
+                    } catch (e) {
+                        console.error('merge progress content failed for', code, e);
+                    }
+                }
+                return count;
+            };
+
             const TABS = [
                 { id: 'classroom', label: '교실', icon: '🏫' },
                 { id: 'roster', label: '명단관리', icon: '👥' },
@@ -4452,7 +4637,7 @@ service cloud.firestore {
                         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 sm:p-6">
                             {activeTab === 'classroom' && <ClassroomTab data={data} updateData={updateData} onGroupClick={goToGroupRecord} />}
                             {activeTab === 'roster' && <RosterTab data={data} updateData={updateData} google={{ ...google, clientId: googleClientId }} bulkCreateClasses={bulkCreateClasses} />}
-                            {activeTab === 'progress' && <ProgressTab data={data} updateData={updateData} classCode={classCode} classCodes={classCodes} fetchAllProgress={fetchAllProgress} applyLessonToAllClasses={applyLessonToAllClasses} timetable={timetable} noSchoolDates={noSchoolDates} />}
+                            {activeTab === 'progress' && <ProgressTab data={data} updateData={updateData} classCode={classCode} classCodes={classCodes} fetchAllProgress={fetchAllProgress} applyLessonToAllClasses={applyLessonToAllClasses} mergeProgressContent={mergeProgressContent} timetable={timetable} noSchoolDates={noSchoolDates} />}
                             {activeTab === 'record' && <RecordTab data={data} updateData={updateData} focusGroupId={focusGroupId} onFocusHandled={() => setFocusGroupId(null)} classCodes={classCodes} fetchAllChecklists={fetchAllChecklists} />}
                             {activeTab === 'settings' && (
                                 <SettingsTab
