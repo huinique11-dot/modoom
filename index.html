@@ -596,6 +596,20 @@
             );
         }
 
+        // 좁은 표 안에서 날짜를 "연-월-일" 전체로 보여주면 자리를 너무 많이
+        // 차지해서, 보이는 글자는 "월-일"만 남기고 실제 날짜 선택(달력)은
+        // 투명하게 겹쳐둔 진짜 <input type="date">가 그대로 처리하게 한다.
+        function CompactDateInput({ value, onChange, title }) {
+            const display = value && value.length >= 10 ? value.slice(5) : '날짜';
+            return (
+                <span className="relative inline-flex items-center" title={title}>
+                    <span className="text-[10px] text-slate-500 whitespace-nowrap pointer-events-none">{display}</span>
+                    <input type="date" value={value || ''} onChange={e => onChange(e.target.value)}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                </span>
+            );
+        }
+
         function TagPicker({ selected, onToggle, subject }) {
             const groups = keywordGroupsFor(subject);
             const [openCat, setOpenCat] = useState(groups[0].category);
@@ -2903,7 +2917,7 @@
             );
         }
 
-        function ProgressTab({ data, updateData, classCode, classCodes, fetchAllProgress, applyLessonToAllClasses, mergeProgressContent, updateProgressDate, timetable, noSchoolDates }) {
+        function ProgressTab({ data, updateData, classCode, classCodes, fetchAllProgress, applyLessonToAllClasses, mergeProgressContent, updateProgressDate, addProgressEntryForContent, timetable, noSchoolDates }) {
             const [mode, setMode] = useState('mine');
             const [form, setForm] = useState({ lesson: '', content: '', date: todayStr() });
             const [editingId, setEditingId] = useState(null);
@@ -3117,9 +3131,28 @@
                 await loadCompare();
             };
 
+            // 전체 학급 비교 표에서 칸(특히 "내용 없음")을 바로 눌러 입력할
+            // 수 있게 한다 — 저장 버튼 없이, 다른 데로 포커스가 빠지면
+            // (또는 Enter) 바로 저장된다.
+            const doEditContent = async (code, id, text) => {
+                await mergeProgressContent([{ code, id }], text);
+                await loadCompare();
+            };
+
             const doUpdateDate = async (code, id, newDate) => {
                 if (!newDate) return;
                 await updateProgressDate(code, id, newDate);
+                await loadCompare();
+            };
+
+            // 진도별 보기에서 어떤 반에 이 진도가 아직 없을 때(빈 칸), 그
+            // 반 시간표에 맞는 날짜를 골라 바로 추가한다.
+            const [pickerFor, setPickerFor] = useState(null); // { content, code }
+            const doAddEntryForContent = async (date) => {
+                if (!pickerFor || !date) return;
+                const { content, code } = pickerFor;
+                setPickerFor(null);
+                await addProgressEntryForContent(code, content, date);
                 await loadCompare();
             };
 
@@ -3198,15 +3231,60 @@
                 return [...known, ...unknown];
             }, [byContentGroups, data.progressOrder]);
 
+            // progressOrder가 비어있으면(아직 한 번도 안 건드렸으면) 지금
+            // 보이는 순서(날짜순)를 그대로 베이스로 깔고, 그 사이에 새로
+            // 생긴(아직 목록에 없는) 진도도 끝에 끼워 넣어 완전한 순서
+            // 배열을 만든다. 버튼 이동과 드래그 둘 다 이 위에서 계산한다.
+            const fullOrder = (prev) => {
+                const current = (prev.progressOrder && prev.progressOrder.length) ? [...prev.progressOrder] : orderedGroups.map(g => g.content);
+                const known = new Set(current);
+                orderedGroups.forEach(g => { if (!known.has(g.content)) current.push(g.content); });
+                return current;
+            };
+
             const moveContent = (content, delta) => {
                 updateData(prev => {
-                    const current = (prev.progressOrder && prev.progressOrder.length) ? [...prev.progressOrder] : orderedGroups.map(g => g.content);
-                    const known = new Set(current);
-                    orderedGroups.forEach(g => { if (!known.has(g.content)) current.push(g.content); });
+                    const current = fullOrder(prev);
                     const idx = current.indexOf(content);
                     const swapIdx = idx + delta;
                     if (idx < 0 || swapIdx < 0 || swapIdx >= current.length) return prev;
                     [current[idx], current[swapIdx]] = [current[swapIdx], current[idx]];
+                    return { ...prev, progressOrder: current };
+                });
+            };
+
+            // 순번 왼쪽의 손잡이(⠿)를 눌러 끌어서 줄 순서를 바로 옮긴다.
+            // Pointer Events를 쓰면 마우스와 터치(모바일) 둘 다 같은 코드로
+            // 처리된다. setPointerCapture로 손잡이에 포인터를 묶어두면,
+            // 손가락/마우스가 어디로 움직이든 move/up 이벤트가 계속 그
+            // 손잡이로 들어온다 — 그래서 핸들러 세 개를 전부 같은 요소에
+            // 붙여두면 된다.
+            const [dragState, setDragState] = useState(null); // { content, overIndex }
+            const startDrag = (e, content, index) => {
+                e.preventDefault();
+                e.currentTarget.setPointerCapture(e.pointerId);
+                setDragState({ content, overIndex: index });
+            };
+            const onDragMove = (e) => {
+                if (!dragState) return;
+                const el = document.elementFromPoint(e.clientX, e.clientY);
+                const row = el && el.closest('tr[data-order-index]');
+                if (!row) return;
+                const idx = parseInt(row.getAttribute('data-order-index'), 10);
+                setDragState(prev => (prev && prev.overIndex !== idx) ? { ...prev, overIndex: idx } : prev);
+            };
+            const endDrag = () => {
+                if (!dragState) return;
+                const { content, overIndex } = dragState;
+                setDragState(null);
+                updateData(prev => {
+                    const current = fullOrder(prev);
+                    const fromIdx = current.indexOf(content);
+                    if (fromIdx === -1 || fromIdx === overIndex) return prev;
+                    current.splice(fromIdx, 1);
+                    let insertAt = fromIdx < overIndex ? overIndex - 1 : overIndex;
+                    insertAt = Math.max(0, Math.min(insertAt, current.length));
+                    current.splice(insertAt, 0, content);
                     return { ...prev, progressOrder: current };
                 });
             };
@@ -3375,7 +3453,7 @@
                                                                             {entryDate && <span className="text-[10px] text-slate-400">{entryDate}</span>}
                                                                             {entry.completed === false && <span className="text-[10px] text-amber-600 font-bold">📌 예정</span>}
                                                                         </div>
-                                                                        <div className="truncate">{entry.content || <span className="text-slate-300">(내용 없음)</span>}</div>
+                                                                        <InlineEditText value={entry.content} onChange={text => doEditContent(code, entry.id, text)} placeholder="(내용 없음)" className="truncate w-full" />
                                                                     </div>
                                                                 ) : <span className="text-slate-200">—</span>}
                                                             </td>
@@ -3414,7 +3492,7 @@
                     {mode === 'byContent' && (
                         <div>
                             <div className="flex items-center justify-between mb-2 gap-2">
-                                <p className="text-xs text-slate-500">반마다 휴강으로 차시 번호가 달라져도 흔들리지 않게, 차시 번호 대신 진도(내용)를 기준으로 묶어서 반마다 언제·몇 차시에 나갔는지 봐요. 진도 이름을 눌러 바로 고칠 수 있고, 같은 수업인데 여러 줄로 흩어졌다면 체크해서 하나로 합쳐보세요.</p>
+                                <p className="text-xs text-slate-500">반마다 휴강으로 차시 번호가 달라져도 흔들리지 않게, 차시 번호 대신 진도(내용)를 기준으로 묶어서 반마다 언제·몇 차시에 나갔는지 봐요. ⠿를 끌어서 순서를 바꿀 수 있고, 진도 이름을 눌러 바로 고칠 수 있고, 같은 수업인데 여러 줄로 흩어졌다면 체크해서 하나로 합쳐보세요.</p>
                                 <button onClick={loadCompare} disabled={loadingCompare} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 font-bold text-indigo-600 hover:bg-indigo-50 shrink-0">{loadingCompare ? '불러오는 중...' : '↻ 새로고침'}</button>
                             </div>
                             {selectedContents.size > 0 && (
@@ -3431,46 +3509,48 @@
                                     <table className="min-w-full text-xs">
                                         <thead className="bg-slate-50">
                                             <tr>
-                                                <th className="px-3 py-2 text-left font-bold text-slate-500 sticky left-0 bg-slate-50">순번 · 진도(내용)</th>
+                                                <th className="px-2 py-2 text-left font-bold text-slate-500 sticky left-0 bg-slate-50">진도</th>
                                                 {classCodes.map(code => (
-                                                    <th key={code} className={`px-3 py-2 text-left font-bold whitespace-nowrap ${code === classCode ? 'text-indigo-600' : 'text-slate-500'}`}>{code}{code === classCode ? ' (현재)' : ''}</th>
+                                                    <th key={code} className={`px-1.5 py-2 text-left font-bold whitespace-nowrap ${code === classCode ? 'text-indigo-600' : 'text-slate-500'}`}>{code}</th>
                                                 ))}
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {orderedGroups.map((g, i) => {
                                                 const isSelected = selectedContents.has(g.content);
+                                                const isDragging = dragState && dragState.content === g.content;
+                                                const isDropTarget = dragState && !isDragging && dragState.overIndex === i;
                                                 return (
-                                                <tr key={i} className={`border-t border-slate-100 ${isSelected ? 'bg-indigo-50/40' : ''}`}>
-                                                    <td className={`px-3 py-2 max-w-[16rem] font-medium text-slate-700 sticky left-0 ${isSelected ? 'bg-indigo-50' : 'bg-white'}`}>
-                                                        <div className="flex items-center gap-1.5">
+                                                <tr key={g.content} data-order-index={i}
+                                                    className={`border-t ${isDropTarget ? 'border-t-2 border-indigo-400' : 'border-slate-100'} ${isSelected ? 'bg-indigo-50/40' : ''} ${isDragging ? 'opacity-40' : ''}`}>
+                                                    <td className={`px-2 py-2 max-w-[11rem] font-medium text-slate-700 sticky left-0 ${isSelected ? 'bg-indigo-50' : 'bg-white'}`}>
+                                                        <div className="flex items-center gap-1">
+                                                            <span onPointerDown={e => startDrag(e, g.content, i)} onPointerMove={onDragMove} onPointerUp={endDrag} onPointerCancel={endDrag}
+                                                                title="눌러서 끌면 순서를 바꿀 수 있어요" style={{ touchAction: 'none' }}
+                                                                className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 select-none shrink-0">⠿</span>
                                                             <span className="text-[10px] text-slate-400 w-4 text-right shrink-0">{i + 1}</span>
-                                                            <div className="flex flex-col shrink-0 leading-none">
-                                                                <button onClick={() => moveContent(g.content, -1)} disabled={i === 0}
-                                                                    title="위로" className="text-[9px] text-slate-400 hover:text-indigo-600 disabled:opacity-20 disabled:hover:text-slate-400">▲</button>
-                                                                <button onClick={() => moveContent(g.content, 1)} disabled={i === orderedGroups.length - 1}
-                                                                    title="아래로" className="text-[9px] text-slate-400 hover:text-indigo-600 disabled:opacity-20 disabled:hover:text-slate-400">▼</button>
-                                                            </div>
                                                             <input type="checkbox" checked={isSelected} onChange={() => toggleContentSelected(g.content)} className="w-3.5 h-3.5 accent-indigo-600 shrink-0" />
-                                                            <InlineEditText value={g.content} onChange={text => doRenameGroup(g, text)} title="눌러서 이 진도 이름을 바로 고쳐요" className="truncate max-w-[12rem]" />
+                                                            <InlineEditText value={g.content} onChange={text => doRenameGroup(g, text)} title="눌러서 이 진도 이름을 바로 고쳐요" className="truncate max-w-[7.5rem]" />
                                                         </div>
                                                     </td>
                                                     {classCodes.map(code => {
                                                         const entries = g.byClass[code];
                                                         return (
-                                                            <td key={code} className="px-3 py-2 whitespace-nowrap text-slate-600">
+                                                            <td key={code} className="px-1.5 py-2 whitespace-nowrap text-slate-600">
                                                                 {entries && entries.length ? (
                                                                     <div className="flex flex-col gap-0.5">
                                                                         {entries.map(e => (
                                                                             <div key={e.id} className="flex items-center gap-1">
-                                                                                <input type="date" value={e.date || ''} onChange={ev => doUpdateDate(code, e.id, ev.target.value)}
-                                                                                    title="날짜를 다시 고르면 이 반의 차시 번호도 자동으로 맞춰져요"
-                                                                                    className="text-[10px] text-slate-500 border border-transparent hover:border-slate-200 rounded px-0.5 py-0 w-[6.2rem] outline-none focus:border-indigo-500 bg-transparent" />
+                                                                                <CompactDateInput value={e.date} onChange={d => doUpdateDate(code, e.id, d)}
+                                                                                    title="날짜를 다시 고르면 이 반의 차시 번호도 자동으로 맞춰져요" />
                                                                                 {e.lesson && <span className="font-bold text-indigo-600 whitespace-nowrap">{e.lesson}차시</span>}
                                                                             </div>
                                                                         ))}
                                                                     </div>
-                                                                ) : <span className="text-slate-200">—</span>}
+                                                                ) : (
+                                                                    <button onClick={() => setPickerFor({ content: g.content, code })}
+                                                                        title="날짜를 골라 이 반에도 추가해요" className="text-slate-300 hover:text-indigo-500 text-sm font-bold w-5 h-5 flex items-center justify-center rounded hover:bg-indigo-50">＋</button>
+                                                                )}
                                                             </td>
                                                         );
                                                     })}
@@ -3484,6 +3564,11 @@
                                 <p className="text-sm text-slate-400">{loadingCompare ? '불러오는 중...' : '비교할 진도 내용이 없습니다.'}</p>
                             )}
                         </div>
+                    )}
+                    {pickerFor && (
+                        <TimetableDayPicker classCode={pickerFor.code} timetable={timetable}
+                            title={`${pickerFor.code} · ${pickerFor.content}`}
+                            onPick={doAddEntryForContent} onClose={() => setPickerFor(null)} />
                     )}
                 </div>
             );
@@ -3719,6 +3804,66 @@
                     onAdd(addDaysStr(dayStr, 1), r.end, r.label);
                 }
             });
+        }
+
+        // "진도별 보기"에서 어떤 반에 아직 없는 진도를 추가할 때, 아무
+        // 날짜나 고르면 그 반 시간표와 안 맞는 날을 고르기 쉬워서, 이 반이
+        // 실제로 수업하는 요일만 달력에서 눌러 고를 수 있게 한다.
+        function TimetableDayPicker({ classCode, timetable, title, onPick, onClose }) {
+            const [cursor, setCursor] = useState(() => {
+                const t = parseDateStr(todayStr());
+                return { y: t.getUTCFullYear(), m: t.getUTCMonth() };
+            });
+            const mySlotDays = useMemo(() =>
+                new Set(Object.keys(timetable || {}).filter(s => timetable[s] === classCode).map(s => s[0])),
+                [timetable, classCode]);
+            const shiftMonth = (delta) => setCursor(({ y, m }) => {
+                const d = new Date(Date.UTC(y, m + delta, 1));
+                return { y: d.getUTCFullYear(), m: d.getUTCMonth() };
+            });
+            const firstOfMonth = new Date(Date.UTC(cursor.y, cursor.m, 1));
+            const daysInMonth = new Date(Date.UTC(cursor.y, cursor.m + 1, 0)).getUTCDate();
+            const leadingBlanks = firstOfMonth.getUTCDay();
+            const cells = [];
+            for (let i = 0; i < leadingBlanks; i++) cells.push(null);
+            for (let d = 1; d <= daysInMonth; d++) cells.push(formatDateStr(new Date(Date.UTC(cursor.y, cursor.m, d))));
+            const todayS = todayStr();
+            return (
+                <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" onClick={onClose}>
+                    <div className="bg-white rounded-xl p-4 w-full max-w-xs shadow-xl" onClick={e => e.stopPropagation()}>
+                        {title && <p className="text-xs font-bold text-slate-600 mb-2 truncate">{title}</p>}
+                        <div className="flex items-center justify-between mb-2">
+                            <button type="button" onClick={() => shiftMonth(-1)} className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">‹</button>
+                            <span className="text-sm font-bold text-slate-700">{cursor.y}년 {cursor.m + 1}월</span>
+                            <button type="button" onClick={() => shiftMonth(1)} className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">›</button>
+                        </div>
+                        {!mySlotDays.size && <p className="text-[11px] text-amber-600 mb-2">이 반의 시간표가 설정 탭에 없어서 모든 날짜를 고를 수 있어요.</p>}
+                        <div className="grid grid-cols-7 gap-1 text-center">
+                            {KOREAN_WEEKDAYS.map(d => (
+                                <div key={d} className={`text-[11px] font-bold py-1 ${d === '일' || d === '토' ? 'text-rose-400' : 'text-slate-400'}`}>{d}</div>
+                            ))}
+                            {cells.map((dayStr, i) => {
+                                if (!dayStr) return <div key={i} />;
+                                const weekday = KOREAN_WEEKDAYS[parseDateStr(dayStr).getUTCDay()];
+                                const isClassDay = !mySlotDays.size || mySlotDays.has(weekday);
+                                const isToday = dayStr === todayS;
+                                const dayNum = parseInt(dayStr.slice(-2), 10);
+                                return (
+                                    <button key={dayStr} type="button" disabled={!isClassDay} onClick={() => onPick(dayStr)}
+                                        title={dayStr}
+                                        className={`h-9 rounded-lg text-xs font-medium transition-colors ${isClassDay ? 'bg-indigo-50 text-indigo-700 font-bold hover:bg-indigo-100' : 'text-slate-200 cursor-not-allowed'} ${isToday && isClassDay ? 'ring-2 ring-indigo-300' : ''}`}>
+                                        {dayNum}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-2">{mySlotDays.size ? '이 반 시간표에 있는 요일만 골라 누를 수 있어요.' : ''}</p>
+                        <div className="flex justify-end mt-2">
+                            <button type="button" onClick={onClose} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">닫기</button>
+                        </div>
+                    </div>
+                </div>
+            );
         }
 
         function NoSchoolCalendar({ dates, onAdd, onRemove }) {
@@ -4718,6 +4863,33 @@ service cloud.firestore {
                 }
             };
 
+            // "진도별 보기"에서 어떤 반에 아직 이 진도(내용)가 없을 때(빈
+            // 칸), 날짜를 골라 그 반에도 같은 내용으로 새 기록을 만든다.
+            // 번호는 어차피 날짜 기준으로 다시 맞춰지니 임시값이면 된다.
+            const addProgressEntryForContent = async (code, content, date) => {
+                const apply = (list) => renumberByDate([...(list || []), { id: uid(), lesson: '1', content, detail: '', date, completed: true, updatedAt: Date.now() }]);
+                if (code === classCode) {
+                    if (db) {
+                        await transactionalWrite(db.collection('classes').doc(code), prev => ({ ...prev, progress: apply(prev.progress) }));
+                    } else {
+                        updateData(prev => ({ ...prev, progress: apply(prev.progress) }));
+                    }
+                    return;
+                }
+                try {
+                    if (db) {
+                        await transactionalWrite(db.collection('classes').doc(code), base => ({ ...base, progress: apply(base.progress) }));
+                    } else {
+                        const raw = localStorage.getItem(`sga_data_${code}`);
+                        const base = raw ? { ...DEFAULT_DATA, ...JSON.parse(raw) } : DEFAULT_DATA;
+                        const next = { ...base, progress: apply(base.progress) };
+                        localStorage.setItem(`sga_data_${code}`, JSON.stringify(next));
+                    }
+                } catch (e) {
+                    console.error('add progress entry failed for', code, e);
+                }
+            };
+
             const TABS = [
                 { id: 'classroom', label: '교실', icon: '🏫' },
                 { id: 'roster', label: '명단관리', icon: '👥' },
@@ -4728,7 +4900,7 @@ service cloud.firestore {
             return (
                 <div className="min-h-screen bg-slate-50">
                     <header className="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
-                        <div className="max-w-6xl mx-auto px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-2">
+                        <div className="max-w-6xl xl:max-w-[1600px] mx-auto px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-2">
                             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 min-w-0">
                                 <span className="text-xl sm:text-2xl shrink-0">🧩</span>
                                 <h1 className="text-sm sm:text-xl font-bold text-indigo-600 truncate">모둠 활동 도우미</h1>
@@ -4771,7 +4943,7 @@ service cloud.firestore {
 
                     {syncConflict && <SyncConflictModal {...syncConflict} />}
 
-                    <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 pb-24 sm:pb-6">
+                    <main className="max-w-6xl xl:max-w-[1600px] mx-auto px-3 sm:px-4 py-4 sm:py-6 pb-24 sm:pb-6">
                         <div className="hidden sm:flex border-b border-slate-200 mb-6 overflow-x-auto whitespace-nowrap">
                             {TABS.map(tab => (
                                 <button key={tab.id} onClick={() => setActiveTab(tab.id)}
@@ -4784,7 +4956,7 @@ service cloud.firestore {
                         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 sm:p-6">
                             {activeTab === 'classroom' && <ClassroomTab data={data} updateData={updateData} onGroupClick={goToGroupRecord} />}
                             {activeTab === 'roster' && <RosterTab data={data} updateData={updateData} google={{ ...google, clientId: googleClientId }} bulkCreateClasses={bulkCreateClasses} />}
-                            {activeTab === 'progress' && <ProgressTab data={data} updateData={updateData} classCode={classCode} classCodes={classCodes} fetchAllProgress={fetchAllProgress} applyLessonToAllClasses={applyLessonToAllClasses} mergeProgressContent={mergeProgressContent} updateProgressDate={updateProgressDate} timetable={timetable} noSchoolDates={noSchoolDates} />}
+                            {activeTab === 'progress' && <ProgressTab data={data} updateData={updateData} classCode={classCode} classCodes={classCodes} fetchAllProgress={fetchAllProgress} applyLessonToAllClasses={applyLessonToAllClasses} mergeProgressContent={mergeProgressContent} updateProgressDate={updateProgressDate} addProgressEntryForContent={addProgressEntryForContent} timetable={timetable} noSchoolDates={noSchoolDates} />}
                             {activeTab === 'record' && <RecordTab data={data} updateData={updateData} focusGroupId={focusGroupId} onFocusHandled={() => setFocusGroupId(null)} classCodes={classCodes} fetchAllChecklists={fetchAllChecklists} />}
                             {activeTab === 'settings' && (
                                 <SettingsTab
