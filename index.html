@@ -2903,7 +2903,7 @@
             );
         }
 
-        function ProgressTab({ data, updateData, classCode, classCodes, fetchAllProgress, applyLessonToAllClasses, mergeProgressContent, timetable, noSchoolDates }) {
+        function ProgressTab({ data, updateData, classCode, classCodes, fetchAllProgress, applyLessonToAllClasses, mergeProgressContent, updateProgressDate, timetable, noSchoolDates }) {
             const [mode, setMode] = useState('mine');
             const [form, setForm] = useState({ lesson: '', content: '', date: todayStr() });
             const [editingId, setEditingId] = useState(null);
@@ -3111,6 +3111,12 @@
                 if (!trimmed || trimmed === g.content) return;
                 const targets = Object.entries(g.byClass).flatMap(([code, entries]) => entries.map(e => ({ code, id: e.id })));
                 await mergeProgressContent(targets, trimmed);
+                await loadCompare();
+            };
+
+            const doUpdateDate = async (code, id, newDate) => {
+                if (!newDate) return;
+                await updateProgressDate(code, id, newDate);
                 await loadCompare();
             };
 
@@ -3419,10 +3425,12 @@
                                                                 {entries && entries.length ? (
                                                                     <div className="flex flex-col gap-0.5">
                                                                         {entries.map(e => (
-                                                                            <span key={e.id}>
-                                                                                {e.date && <span className="text-[10px] text-slate-400 mr-1">{e.date}</span>}
-                                                                                {e.lesson && <span className="font-bold text-indigo-600">{e.lesson}차시</span>}
-                                                                            </span>
+                                                                            <div key={e.id} className="flex items-center gap-1">
+                                                                                <input type="date" value={e.date || ''} onChange={ev => doUpdateDate(code, e.id, ev.target.value)}
+                                                                                    title="날짜를 다시 고르면 이 반의 차시 번호도 자동으로 맞춰져요"
+                                                                                    className="text-[10px] text-slate-500 border border-transparent hover:border-slate-200 rounded px-0.5 py-0 w-[6.2rem] outline-none focus:border-indigo-500 bg-transparent" />
+                                                                                {e.lesson && <span className="font-bold text-indigo-600 whitespace-nowrap">{e.lesson}차시</span>}
+                                                                            </div>
                                                                         ))}
                                                                     </div>
                                                                 ) : <span className="text-slate-200">—</span>}
@@ -4645,6 +4653,33 @@ service cloud.firestore {
                 return count;
             };
 
+            // "진도별 보기"에서 날짜가 잘못 적힌 걸 바로 고를 수 있게 한다.
+            // 날짜가 바뀌면 그 반의 차시 번호도 날짜 기준으로 다시 맞춘다
+            // (ProgressTab의 submit과 같은 renumberByDate 규칙).
+            const updateProgressDate = async (code, id, newDate) => {
+                const apply = (list) => renumberByDate((list || []).map(p => p.id === id ? { ...p, date: newDate, updatedAt: Date.now() } : p));
+                if (code === classCode) {
+                    if (db) {
+                        await transactionalWrite(db.collection('classes').doc(code), prev => ({ ...prev, progress: apply(prev.progress) }));
+                    } else {
+                        updateData(prev => ({ ...prev, progress: apply(prev.progress) }));
+                    }
+                    return;
+                }
+                try {
+                    if (db) {
+                        await transactionalWrite(db.collection('classes').doc(code), base => ({ ...base, progress: apply(base.progress) }));
+                    } else {
+                        const raw = localStorage.getItem(`sga_data_${code}`);
+                        const base = raw ? { ...DEFAULT_DATA, ...JSON.parse(raw) } : DEFAULT_DATA;
+                        const next = { ...base, progress: apply(base.progress) };
+                        localStorage.setItem(`sga_data_${code}`, JSON.stringify(next));
+                    }
+                } catch (e) {
+                    console.error('update progress date failed for', code, e);
+                }
+            };
+
             const TABS = [
                 { id: 'classroom', label: '교실', icon: '🏫' },
                 { id: 'roster', label: '명단관리', icon: '👥' },
@@ -4711,7 +4746,7 @@ service cloud.firestore {
                         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 sm:p-6">
                             {activeTab === 'classroom' && <ClassroomTab data={data} updateData={updateData} onGroupClick={goToGroupRecord} />}
                             {activeTab === 'roster' && <RosterTab data={data} updateData={updateData} google={{ ...google, clientId: googleClientId }} bulkCreateClasses={bulkCreateClasses} />}
-                            {activeTab === 'progress' && <ProgressTab data={data} updateData={updateData} classCode={classCode} classCodes={classCodes} fetchAllProgress={fetchAllProgress} applyLessonToAllClasses={applyLessonToAllClasses} mergeProgressContent={mergeProgressContent} timetable={timetable} noSchoolDates={noSchoolDates} />}
+                            {activeTab === 'progress' && <ProgressTab data={data} updateData={updateData} classCode={classCode} classCodes={classCodes} fetchAllProgress={fetchAllProgress} applyLessonToAllClasses={applyLessonToAllClasses} mergeProgressContent={mergeProgressContent} updateProgressDate={updateProgressDate} timetable={timetable} noSchoolDates={noSchoolDates} />}
                             {activeTab === 'record' && <RecordTab data={data} updateData={updateData} focusGroupId={focusGroupId} onFocusHandled={() => setFocusGroupId(null)} classCodes={classCodes} fetchAllChecklists={fetchAllChecklists} />}
                             {activeTab === 'settings' && (
                                 <SettingsTab
