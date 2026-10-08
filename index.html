@@ -37,7 +37,7 @@
         // ---------------------------------------------------------------
         // Constants & small utilities
         // ---------------------------------------------------------------
-        const DEFAULT_DATA = { students: [], rounds: [], groupRecords: [], individualRecords: [], sessionNotes: [], categories: [], progress: [], classroomLayout: {}, checklists: [] };
+        const DEFAULT_DATA = { students: [], rounds: [], groupRecords: [], individualRecords: [], sessionNotes: [], categories: [], progress: [], classroomLayout: {}, checklists: [], progressOrder: [] };
 
         const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
         const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -1916,7 +1916,7 @@
                 const content = sessionNoteText.trim();
                 updateData(prev => {
                     const next = { ...prev, sessionNotes: [{ id: uid(), roundId, date, lesson: lessonTag || null, content, createdAt: Date.now() }, ...prev.sessionNotes] };
-                    if (lessonTag) next.progress = upsertLesson(next.progress || [], lessonTag, content, undefined, date);
+                    if (lessonTag) next.progress = renumberByDate(upsertLesson(next.progress || [], lessonTag, content, undefined, date, undefined, false));
                     return next;
                 });
                 setSessionNoteText('');
@@ -3046,7 +3046,10 @@
                 const newEntries = candidateDates.map((d, i) => ({
                     id: uid(), lesson: String(maxLesson + i + 1), content: '', detail: '', date: d, completed: false, updatedAt: Date.now(),
                 }));
-                updateData(prev => ({ ...prev, progress: [...(prev.progress || []), ...newEntries] }));
+                // 새로 만든 차시들이 이미 수동으로 적어둔 다른 차시들 사이
+                // 날짜에 끼어들 수도 있으니, 추가한 뒤 전체를 날짜순으로
+                // 다시 번호 매긴다.
+                updateData(prev => ({ ...prev, progress: renumberByDate([...(prev.progress || []), ...newEntries]) }));
                 setGenMsg(`${newEntries.length}개 차시를 만들었어요 (${candidateDates[0]} ~ ${candidateDates[candidateDates.length - 1]}). 내용은 비어있으니 하나씩 채우거나 수정하면 되고, 수업을 마치면 완료 체크만 해도 돼요.`);
             };
 
@@ -3180,6 +3183,33 @@
                 });
                 return groups;
             }, [compareData, classCodes]);
+
+            // 자동으로는 날짜순으로 보여주지만, 교사가 보기 편한 순서로 직접
+            // 바꾸고 싶을 수 있다. 한 번이라도 순서를 바꾸면 그때부터는
+            // data.progressOrder가 전체 순서를 결정하고(저장돼 있어서 다음에
+            // 봐도 그대로), 아직 한 번도 손대지 않은 새 진도는 맨 뒤에
+            // 붙는다.
+            const orderedGroups = useMemo(() => {
+                const order = data.progressOrder || [];
+                if (!order.length) return byContentGroups;
+                const pos = new Map(order.map((c, i) => [c, i]));
+                const known = byContentGroups.filter(g => pos.has(g.content)).sort((a, b) => pos.get(a.content) - pos.get(b.content));
+                const unknown = byContentGroups.filter(g => !pos.has(g.content));
+                return [...known, ...unknown];
+            }, [byContentGroups, data.progressOrder]);
+
+            const moveContent = (content, delta) => {
+                updateData(prev => {
+                    const current = (prev.progressOrder && prev.progressOrder.length) ? [...prev.progressOrder] : orderedGroups.map(g => g.content);
+                    const known = new Set(current);
+                    orderedGroups.forEach(g => { if (!known.has(g.content)) current.push(g.content); });
+                    const idx = current.indexOf(content);
+                    const swapIdx = idx + delta;
+                    if (idx < 0 || swapIdx < 0 || swapIdx >= current.length) return prev;
+                    [current[idx], current[swapIdx]] = [current[swapIdx], current[idx]];
+                    return { ...prev, progressOrder: current };
+                });
+            };
 
             return (
                 <div>
@@ -3396,26 +3426,33 @@
                                 </div>
                             )}
                             {mergeMsg && <p className="text-xs text-emerald-600 mb-2">{mergeMsg}</p>}
-                            {compareData && byContentGroups.length > 0 ? (
+                            {compareData && orderedGroups.length > 0 ? (
                                 <div className="overflow-x-auto border border-slate-200 rounded-xl">
                                     <table className="min-w-full text-xs">
                                         <thead className="bg-slate-50">
                                             <tr>
-                                                <th className="px-3 py-2 text-left font-bold text-slate-500 sticky left-0 bg-slate-50">진도(내용)</th>
+                                                <th className="px-3 py-2 text-left font-bold text-slate-500 sticky left-0 bg-slate-50">순번 · 진도(내용)</th>
                                                 {classCodes.map(code => (
                                                     <th key={code} className={`px-3 py-2 text-left font-bold whitespace-nowrap ${code === classCode ? 'text-indigo-600' : 'text-slate-500'}`}>{code}{code === classCode ? ' (현재)' : ''}</th>
                                                 ))}
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {byContentGroups.map((g, i) => {
+                                            {orderedGroups.map((g, i) => {
                                                 const isSelected = selectedContents.has(g.content);
                                                 return (
                                                 <tr key={i} className={`border-t border-slate-100 ${isSelected ? 'bg-indigo-50/40' : ''}`}>
                                                     <td className={`px-3 py-2 max-w-[16rem] font-medium text-slate-700 sticky left-0 ${isSelected ? 'bg-indigo-50' : 'bg-white'}`}>
                                                         <div className="flex items-center gap-1.5">
+                                                            <span className="text-[10px] text-slate-400 w-4 text-right shrink-0">{i + 1}</span>
+                                                            <div className="flex flex-col shrink-0 leading-none">
+                                                                <button onClick={() => moveContent(g.content, -1)} disabled={i === 0}
+                                                                    title="위로" className="text-[9px] text-slate-400 hover:text-indigo-600 disabled:opacity-20 disabled:hover:text-slate-400">▲</button>
+                                                                <button onClick={() => moveContent(g.content, 1)} disabled={i === orderedGroups.length - 1}
+                                                                    title="아래로" className="text-[9px] text-slate-400 hover:text-indigo-600 disabled:opacity-20 disabled:hover:text-slate-400">▼</button>
+                                                            </div>
                                                             <input type="checkbox" checked={isSelected} onChange={() => toggleContentSelected(g.content)} className="w-3.5 h-3.5 accent-indigo-600 shrink-0" />
-                                                            <InlineEditText value={g.content} onChange={text => doRenameGroup(g, text)} title="눌러서 이 진도 이름을 바로 고쳐요" className="truncate max-w-[13rem]" />
+                                                            <InlineEditText value={g.content} onChange={text => doRenameGroup(g, text)} title="눌러서 이 진도 이름을 바로 고쳐요" className="truncate max-w-[12rem]" />
                                                         </div>
                                                     </td>
                                                     {classCodes.map(code => {
@@ -4569,6 +4606,7 @@ service cloud.firestore {
 
             const applyLessonToAllClasses = async ({ lesson, content, detail, date, completed }) => {
                 let count = 0;
+                const apply = (list) => renumberByDate(upsertLesson(list || [], lesson, content, detail, date, completed, false));
                 for (const code of classCodes) {
                     if (code === classCode) {
                         if (db) {
@@ -4582,10 +4620,10 @@ service cloud.firestore {
                             // picks up the committed write and updates the UI itself.
                             await transactionalWrite(db.collection('classes').doc(code), prev => ({
                                 ...prev,
-                                progress: upsertLesson(prev.progress || [], lesson, content, detail, date, completed),
+                                progress: apply(prev.progress),
                             }));
                         } else {
-                            updateData(prev => ({ ...prev, progress: upsertLesson(prev.progress || [], lesson, content, detail, date, completed) }));
+                            updateData(prev => ({ ...prev, progress: apply(prev.progress) }));
                         }
                         count++;
                         continue;
@@ -4598,12 +4636,12 @@ service cloud.firestore {
                             // dropped by this merge.
                             await transactionalWrite(db.collection('classes').doc(code), base => ({
                                 ...base,
-                                progress: upsertLesson(base.progress || [], lesson, content, detail, date, completed),
+                                progress: apply(base.progress),
                             }));
                         } else {
                             const raw = localStorage.getItem(`sga_data_${code}`);
                             const base = raw ? { ...DEFAULT_DATA, ...JSON.parse(raw) } : DEFAULT_DATA;
-                            const next = { ...base, progress: upsertLesson(base.progress || [], lesson, content, detail, date, completed) };
+                            const next = { ...base, progress: apply(base.progress) };
                             localStorage.setItem(`sga_data_${code}`, JSON.stringify(next));
                         }
                         count++;
