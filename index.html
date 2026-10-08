@@ -2748,6 +2748,28 @@
             });
         }
 
+        // 날짜를 수정하거나 날짜가 다른 위치에 새 차시를 추가하면, 입력한
+        // 번호와 실제 날짜 순서가 어긋날 수 있다. 추가/수정할 때마다 번호가
+        // 있는(휴강이 아닌) 항목들을 날짜순으로 다시 세어서 1,2,3...으로
+        // 맞춰준다 — 그래서 번호는 직접 관리할 필요 없이 날짜만 맞으면 된다.
+        // 날짜가 같으면 기존 번호 순서를 그대로 유지한다.
+        function renumberByDate(list) {
+            const dateKey = (p) => p.date || dateFromTimestamp(p.updatedAt) || '';
+            const numbered = list
+                .filter(p => !p.cancelled && p.lesson && !isNaN(parseFloat(p.lesson)) && Number.isInteger(parseFloat(p.lesson)))
+                .slice()
+                .sort((a, b) => {
+                    const da = dateKey(a), db = dateKey(b);
+                    if (da !== db) return da < db ? -1 : 1;
+                    return parseFloat(a.lesson) - parseFloat(b.lesson);
+                });
+            const nextLesson = {};
+            numbered.forEach((p, i) => { nextLesson[p.id] = String(i + 1); });
+            return list.map(p => (nextLesson[p.id] !== undefined && nextLesson[p.id] !== p.lesson)
+                ? { ...p, lesson: nextLesson[p.id], updatedAt: Date.now() }
+                : p);
+        }
+
         // Upsert a progress (진도) entry by lesson number. `detail` and `date` are
         // both optional — omit either to leave an existing entry's value
         // untouched (used when syncing in from a whole-class activity note, which
@@ -2799,7 +2821,12 @@
         // When the caller doesn't say either way, real content implies the
         // lesson actually happened; an existing entry with no new content
         // keeps whatever 완료 state it already had.
-        function upsertLesson(list, lesson, content, detail, date, completed) {
+        // fillGaps defaults to true for every caller except ProgressTab's own
+        // add/edit form, which immediately renumbers everything by date
+        // afterward anyway (renumberByDate) — gap-filling there would create
+        // junk blank placeholders for numbers that were never going to mean
+        // anything once the real, date-based number gets assigned.
+        function upsertLesson(list, lesson, content, detail, date, completed, fillGaps = true) {
             const existing = list.find(p => p.lesson === lesson);
             const resolvedCompleted = completed !== undefined
                 ? completed
@@ -2809,7 +2836,7 @@
                 const nextDate = date === undefined ? (existing.date || '') : date;
                 return list.map(p => p.id === existing.id ? { ...p, content, detail: nextDetail, date: nextDate, completed: resolvedCompleted, updatedAt: Date.now() } : p);
             }
-            const gapEntries = findLessonGaps(list, lesson).map(g => ({ id: uid(), lesson: g, content: '', detail: '', date: date || '', completed: false, updatedAt: Date.now() }));
+            const gapEntries = fillGaps ? findLessonGaps(list, lesson).map(g => ({ id: uid(), lesson: g, content: '', detail: '', date: date || '', completed: false, updatedAt: Date.now() })) : [];
             return [...list, ...gapEntries, { id: uid(), lesson, content, detail: detail || '', date: date || '', completed: resolvedCompleted, updatedAt: Date.now() }];
         }
 
@@ -2897,13 +2924,18 @@
                 if (!form.lesson.trim()) return;
                 updateData(prev => {
                     const list = prev.progress || [];
+                    let next;
                     if (editingId) {
-                        return { ...prev, progress: list.map(p => p.id === editingId ? { ...p, lesson: form.lesson.trim(), content: form.content, date: form.date, completed: form.content.trim() ? true : p.completed, updatedAt: Date.now() } : p) };
+                        next = list.map(p => p.id === editingId ? { ...p, lesson: form.lesson.trim(), content: form.content, date: form.date, completed: form.content.trim() ? true : p.completed, updatedAt: Date.now() } : p);
+                    } else {
+                        // upsertLesson also fills in any skipped lesson numbers between
+                        // the last one recorded and this new one as blank placeholders
+                        // (e.g. adding 5차시 right after 1차시 creates empty 2~4차시 too).
+                        next = upsertLesson(list, form.lesson.trim(), form.content, undefined, form.date, undefined, false);
                     }
-                    // upsertLesson also fills in any skipped lesson numbers between
-                    // the last one recorded and this new one as blank placeholders
-                    // (e.g. adding 5차시 right after 1차시 creates empty 2~4차시 too).
-                    return { ...prev, progress: upsertLesson(list, form.lesson.trim(), form.content, undefined, form.date) };
+                    // 입력한 번호는 일단 자리만 잡아줄 뿐, 실제 번호는 날짜 순서에
+                    // 맞춰 자동으로 다시 계산된다.
+                    return { ...prev, progress: renumberByDate(next) };
                 });
                 resetForm();
             };
@@ -3195,6 +3227,16 @@
                                 </div>
                             </form>
                             {applyMsg && <p className="text-xs text-emerald-600 mb-2">{applyMsg}</p>}
+                            {sorted.length > 0 && (
+                                <div className="flex items-center justify-between gap-2 mb-2">
+                                    <label className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
+                                        <input type="checkbox" checked={selectedLessons.size === sorted.length}
+                                            onChange={() => setSelectedLessons(prev => prev.size === sorted.length ? new Set() : new Set(sorted.map(p => p.id)))}
+                                            className="w-3.5 h-3.5 accent-rose-600" />
+                                        전체 선택
+                                    </label>
+                                </div>
+                            )}
                             {selectedLessons.size > 0 && (
                                 <div className="flex items-center gap-2 mb-2 p-2 bg-rose-50 border border-rose-200 rounded-lg">
                                     <span className="text-xs font-bold text-rose-700 flex-1">{selectedLessons.size}개 선택됨</span>
@@ -3212,8 +3254,6 @@
                                             <div className="flex items-start gap-2 min-w-0">
                                                 <input type="checkbox" checked={selectedLessons.has(p.id)} onChange={() => toggleLessonSelected(p.id)}
                                                     title="선택 (여러 개 고르면 한 번에 삭제할 수 있어요)" className="mt-1 w-4 h-4 shrink-0 accent-rose-600" />
-                                                {!isCancelled && <input type="checkbox" checked={isCompleted} onChange={() => toggleCompleted(p)}
-                                                    title="완료 체크" className="mt-1 w-4 h-4 shrink-0 accent-indigo-600" />}
                                                 <div className={`min-w-0 ${isCancelled ? '' : 'cursor-pointer'}`} onClick={() => !isCancelled && openDetail(p)}>
                                                     {isCancelled ? (
                                                         <span className="text-xs font-bold text-slate-400">🚫 휴강</span>
@@ -3231,6 +3271,12 @@
                                                 </div>
                                             </div>
                                             <div className="flex gap-1 shrink-0">
+                                                {!isCancelled && (
+                                                    <button onClick={() => toggleCompleted(p)} title="완료 처리"
+                                                        className={`text-xs px-2 py-1 rounded-lg border font-bold ${isCompleted ? 'bg-emerald-500 border-emerald-500 text-white hover:bg-emerald-600' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                                                        {isCompleted ? '✓ 완료' : '완료'}
+                                                    </button>
+                                                )}
                                                 {!isCancelled && <button onClick={() => applyToAll(p)} className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">🔁 전체 적용</button>}
                                                 {!isCancelled && <button onClick={() => startEdit(p)} className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">수정</button>}
                                                 <button onClick={() => toggleCancelled(p)} title={isCancelled ? '휴강을 해제하고 차시 번호를 되돌려요' : '이 날은 휴강 처리하고, 다음 차시 번호를 한 칸씩 당겨요'}
