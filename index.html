@@ -3364,7 +3364,7 @@
                                     const isCancelled = !!p.cancelled;
                                     return (
                                     <div key={p.id} className={`border rounded-xl p-3 ${isCancelled ? 'border-slate-200 bg-slate-50 opacity-60' : isCompleted ? 'border-slate-200' : 'border-dashed border-amber-300 bg-amber-50/40'}`}>
-                                        <div className="flex items-start justify-between gap-2">
+                                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
                                             <div className="flex items-start gap-2 min-w-0">
                                                 <input type="checkbox" checked={selectedLessons.has(p.id)} onChange={() => toggleLessonSelected(p.id)}
                                                     title="선택 (여러 개 고르면 한 번에 삭제할 수 있어요)" className="mt-1 w-4 h-4 shrink-0 accent-rose-600" />
@@ -3384,7 +3384,7 @@
                                                     )}
                                                 </div>
                                             </div>
-                                            <div className="flex gap-1 shrink-0">
+                                            <div className="flex flex-wrap gap-1 sm:shrink-0">
                                                 {!isCancelled && (
                                                     <button onClick={() => toggleCompleted(p)} title="완료 처리"
                                                         className={`text-xs px-2 py-1 rounded-lg border font-bold ${isCompleted ? 'bg-emerald-500 border-emerald-500 text-white hover:bg-emerald-600' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
