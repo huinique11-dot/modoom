@@ -3849,15 +3849,15 @@
                                 const isToday = dayStr === todayS;
                                 const dayNum = parseInt(dayStr.slice(-2), 10);
                                 return (
-                                    <button key={dayStr} type="button" disabled={!isClassDay} onClick={() => onPick(dayStr)}
+                                    <button key={dayStr} type="button" onClick={() => onPick(dayStr)}
                                         title={dayStr}
-                                        className={`h-9 rounded-lg text-xs font-medium transition-colors ${isClassDay ? 'bg-indigo-50 text-indigo-700 font-bold hover:bg-indigo-100' : 'text-slate-200 cursor-not-allowed'} ${isToday && isClassDay ? 'ring-2 ring-indigo-300' : ''}`}>
+                                        className={`h-9 rounded-lg text-xs font-medium transition-colors ${isClassDay ? 'bg-indigo-50 text-indigo-700 font-bold hover:bg-indigo-100' : 'text-slate-400 hover:bg-slate-100'} ${isToday ? 'ring-2 ring-indigo-300' : ''}`}>
                                         {dayNum}
                                     </button>
                                 );
                             })}
                         </div>
-                        <p className="text-[11px] text-slate-400 mt-2">{mySlotDays.size ? '이 반 시간표에 있는 요일만 골라 누를 수 있어요.' : ''}</p>
+                        <p className="text-[11px] text-slate-400 mt-2">{mySlotDays.size ? '진하게 표시된 날이 이 반 시간표에 있는 요일이에요. 다른 날짜도 고를 수 있어요.' : ''}</p>
                         <div className="flex justify-end mt-2">
                             <button type="button" onClick={onClose} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">닫기</button>
                         </div>
