@@ -2957,7 +2957,7 @@
             const startEdit = (p) => { setForm({ lesson: p.lesson, content: p.content, date: p.date || dateFromTimestamp(p.updatedAt) || todayStr() }); setEditingId(p.id); };
             const remove = (id) => {
                 if (!window.confirm('이 차시 기록을 삭제할까요?')) return;
-                updateData(prev => ({ ...prev, progress: (prev.progress || []).filter(p => p.id !== id) }));
+                updateData(prev => ({ ...prev, progress: renumberByDate((prev.progress || []).filter(p => p.id !== id)) }));
                 if (editingId === id) resetForm();
             };
 
@@ -2975,7 +2975,7 @@
             const bulkDeleteSelected = () => {
                 if (!selectedLessons.size) return;
                 if (!window.confirm(`선택한 ${selectedLessons.size}개 차시 기록을 삭제할까요?`)) return;
-                updateData(prev => ({ ...prev, progress: (prev.progress || []).filter(p => !selectedLessons.has(p.id)) }));
+                updateData(prev => ({ ...prev, progress: renumberByDate((prev.progress || []).filter(p => !selectedLessons.has(p.id))) }));
                 if (editingId && selectedLessons.has(editingId)) resetForm();
                 setSelectedLessons(new Set());
             };
