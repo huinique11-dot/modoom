@@ -2290,7 +2290,7 @@
             );
         }
 
-        function ChecklistRecord({ data, updateData, classCodes, fetchAllChecklists }) {
+        function ChecklistRecord({ data, updateData, classCodes, fetchAllChecklists, applyChecklistToAllClasses }) {
             const checklists = data.checklists || [];
             const students = useMemo(() => [...data.students].sort(byNumberThenName), [data.students]);
             // 모둠별로 검사받는 활동이라 학생을 번호순으로 쭉 나열하지 않고,
@@ -2335,6 +2335,42 @@
                 updateData(prev => ({ ...prev, checklists: [created, ...(prev.checklists || [])] }));
                 setChecklistId(created.id);
                 setNewTitle(''); setNewItemsText(''); setNewScoreMode('deduct'); setNewMaxScore('100'); setCreating(false);
+            };
+
+            // 지금 입력해둔 틀(제목·항목·배점 방식) 그대로 모든 학급에 한
+            // 번에 새 체크리스트를 만든다. (채점은 당연히 반마다 따로.)
+            const [createAllBusy, setCreateAllBusy] = useState(false);
+            const [createAllMsg, setCreateAllMsg] = useState('');
+            const createChecklistForAll = async () => {
+                const items = newItemsText.split(/[,\n]/).map(s => s.trim()).filter(Boolean).map(label => ({ label, points: 1 }));
+                if (!items.length) { setCreateAllMsg('항목을 먼저 입력해주세요.'); return; }
+                const parsedMax = parseFloat(newMaxScore);
+                const maxScore = isNaN(parsedMax) ? (newScoreMode === 'deduct' ? 100 : 0) : parsedMax;
+                setCreateAllBusy(true);
+                const { count, createdId } = await applyChecklistToAllClasses({
+                    title: newTitle.trim() || '체크리스트', items, scoreMode: newScoreMode, maxScore, skipCurrent: false,
+                });
+                setCreateAllBusy(false);
+                if (createdId) setChecklistId(createdId);
+                setNewTitle(''); setNewItemsText(''); setNewScoreMode('deduct'); setNewMaxScore('100'); setCreating(false);
+                setCreateAllMsg(`${count}개 학급에 만들었습니다.`);
+                setTimeout(() => setCreateAllMsg(''), 3000);
+            };
+
+            // 이미 만들어둔(지금 반의) 체크리스트 틀을 다른 모든 반에도
+            // 그대로 복제한다. 지금 반은 이미 있으니 건드리지 않는다.
+            const [applyAllBusy, setApplyAllBusy] = useState(false);
+            const [applyAllMsg, setApplyAllMsg] = useState('');
+            const applyChecklistToOthers = async () => {
+                if (!checklist) return;
+                setApplyAllBusy(true);
+                const items = checklist.items.map(i => ({ label: i.label, points: i.points }));
+                const { count } = await applyChecklistToAllClasses({
+                    title: checklist.title, items, scoreMode: checklist.scoreMode || 'deduct', maxScore: checklist.maxScore, skipCurrent: true,
+                });
+                setApplyAllBusy(false);
+                setApplyAllMsg(`${count}개 학급에 적용했습니다.`);
+                setTimeout(() => setApplyAllMsg(''), 3000);
             };
 
             // 감점 방식의 '체크 = 못함'과 가점 방식의 '체크 = 잘함'은 정반대
@@ -2544,7 +2580,15 @@
                             </button>
                         )}
                         {checklist && <button onClick={deleteChecklist} className="text-xs px-3 py-2 rounded-lg border border-slate-200 text-rose-500 hover:bg-rose-50">삭제</button>}
+                        {checklist && classCodes.length > 1 && (
+                            <button onClick={applyChecklistToOthers} disabled={applyAllBusy}
+                                className="text-xs px-3 py-2 rounded-lg border border-slate-200 text-indigo-600 hover:bg-indigo-50 font-bold disabled:opacity-50">
+                                {applyAllBusy ? '적용 중...' : '🔁 다른 학급에도 적용'}
+                            </button>
+                        )}
                     </div>
+                    {applyAllMsg && <p className="text-xs text-emerald-600 mb-2">{applyAllMsg}</p>}
+                    {createAllMsg && <p className="text-xs text-emerald-600 mb-2">{createAllMsg}</p>}
 
                     {creating && (
                         <div className="border border-slate-200 rounded-xl p-3 mb-4 bg-slate-50 space-y-2">
@@ -2566,6 +2610,12 @@
                             </div>
                             <div className="flex justify-end gap-2">
                                 <button onClick={() => setCreating(false)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500">취소</button>
+                                {classCodes.length > 1 && (
+                                    <button onClick={createChecklistForAll} disabled={createAllBusy}
+                                        className="text-xs px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-600 font-bold hover:bg-indigo-50 disabled:opacity-50">
+                                        {createAllBusy ? '만드는 중...' : '🔁 모든 학급에 만들기'}
+                                    </button>
+                                )}
                                 <button onClick={createChecklist} className="text-xs bg-indigo-600 text-white px-4 py-1.5 rounded-lg font-bold hover:bg-indigo-700">만들기</button>
                             </div>
                         </div>
@@ -2723,7 +2773,7 @@
             );
         }
 
-        function RecordTab({ data, updateData, focusGroupId, onFocusHandled, classCodes, fetchAllChecklists }) {
+        function RecordTab({ data, updateData, focusGroupId, onFocusHandled, classCodes, fetchAllChecklists, applyChecklistToAllClasses }) {
             const [mode, setMode] = useState('byRound');
             useEffect(() => { if (focusGroupId) setMode('byRound'); }, [focusGroupId]);
 
@@ -2739,7 +2789,7 @@
                     </div>
                     {mode === 'byRound' && <ByRoundRecord data={data} updateData={updateData} focusGroupId={focusGroupId} onFocusHandled={onFocusHandled} />}
                     {mode === 'byStudent' && <ByStudentRecord data={data} updateData={updateData} />}
-                    {mode === 'checklist' && <ChecklistRecord data={data} updateData={updateData} classCodes={classCodes} fetchAllChecklists={fetchAllChecklists} />}
+                    {mode === 'checklist' && <ChecklistRecord data={data} updateData={updateData} classCodes={classCodes} fetchAllChecklists={fetchAllChecklists} applyChecklistToAllClasses={applyChecklistToAllClasses} />}
                 </div>
             );
         }
@@ -4914,6 +4964,50 @@ service cloud.firestore {
                 }
             };
 
+            // 체크리스트 "틀"(제목·항목·배점 방식)을 선택한 여러 반에 한 번에
+            // 복제한다. 반마다 새 체크리스트를 따로 만들 뿐이라, 체크/점수는
+            // (당연히) 반마다 독립적으로 남는다 — 틀만 똑같이 시작한다.
+            // skipCurrent가 true면 지금 반은 건드리지 않는다(이미 있는
+            // 체크리스트를 '다른 반에도' 적용할 때 쓴다).
+            const applyChecklistToAllClasses = async ({ title, items, scoreMode, maxScore, skipCurrent }) => {
+                let count = 0;
+                let createdId = null;
+                const makeChecklist = () => ({
+                    id: uid(), title, date: todayStr(),
+                    items: items.map(i => ({ id: uid(), label: i.label, points: i.points ?? 1 })),
+                    marks: {}, absent: {}, completed: false, scoreMode, maxScore, createdAt: Date.now(),
+                });
+                for (const code of classCodes) {
+                    if (code === classCode) {
+                        if (skipCurrent) continue;
+                        const created = makeChecklist();
+                        createdId = created.id;
+                        if (db) {
+                            await transactionalWrite(db.collection('classes').doc(code), prev => ({ ...prev, checklists: [created, ...(prev.checklists || [])] }));
+                        } else {
+                            updateData(prev => ({ ...prev, checklists: [created, ...(prev.checklists || [])] }));
+                        }
+                        count++;
+                        continue;
+                    }
+                    try {
+                        const created = makeChecklist();
+                        if (db) {
+                            await transactionalWrite(db.collection('classes').doc(code), base => ({ ...base, checklists: [created, ...(base.checklists || [])] }));
+                        } else {
+                            const raw = localStorage.getItem(`sga_data_${code}`);
+                            const base = raw ? { ...DEFAULT_DATA, ...JSON.parse(raw) } : DEFAULT_DATA;
+                            const next = { ...base, checklists: [created, ...(base.checklists || [])] };
+                            localStorage.setItem(`sga_data_${code}`, JSON.stringify(next));
+                        }
+                        count++;
+                    } catch (e) {
+                        console.error('apply checklist failed for', code, e);
+                    }
+                }
+                return { count, createdId };
+            };
+
             const TABS = [
                 { id: 'classroom', label: '교실', icon: '🏫' },
                 { id: 'roster', label: '명단관리', icon: '👥' },
@@ -4981,7 +5075,7 @@ service cloud.firestore {
                             {activeTab === 'classroom' && <ClassroomTab data={data} updateData={updateData} onGroupClick={goToGroupRecord} />}
                             {activeTab === 'roster' && <RosterTab data={data} updateData={updateData} google={{ ...google, clientId: googleClientId }} bulkCreateClasses={bulkCreateClasses} />}
                             {activeTab === 'progress' && <ProgressTab data={data} updateData={updateData} classCode={classCode} classCodes={classCodes} fetchAllProgress={fetchAllProgress} applyLessonToAllClasses={applyLessonToAllClasses} mergeProgressContent={mergeProgressContent} updateProgressDate={updateProgressDate} addProgressEntryForContent={addProgressEntryForContent} timetable={timetable} noSchoolDates={noSchoolDates} />}
-                            {activeTab === 'record' && <RecordTab data={data} updateData={updateData} focusGroupId={focusGroupId} onFocusHandled={() => setFocusGroupId(null)} classCodes={classCodes} fetchAllChecklists={fetchAllChecklists} />}
+                            {activeTab === 'record' && <RecordTab data={data} updateData={updateData} focusGroupId={focusGroupId} onFocusHandled={() => setFocusGroupId(null)} classCodes={classCodes} fetchAllChecklists={fetchAllChecklists} applyChecklistToAllClasses={applyChecklistToAllClasses} />}
                             {activeTab === 'settings' && (
                                 <SettingsTab
                                     classCode={classCode}
