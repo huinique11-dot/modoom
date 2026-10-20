@@ -2331,7 +2331,7 @@
                 const items = newItemsText.split(/[,\n]/).map(s => s.trim()).filter(Boolean).map(label => ({ id: uid(), label, points: 1 }));
                 const parsedMax = parseFloat(newMaxScore);
                 const maxScore = isNaN(parsedMax) ? (newScoreMode === 'deduct' ? 100 : 0) : parsedMax;
-                const created = { id: uid(), title: newTitle.trim() || '체크리스트', date: todayStr(), items, marks: {}, absent: {}, completed: false, scoreMode: newScoreMode, maxScore, createdAt: Date.now() };
+                const created = { id: uid(), title: newTitle.trim() || '체크리스트', date: todayStr(), items, marks: {}, absent: {}, notes: {}, completed: false, scoreMode: newScoreMode, maxScore, createdAt: Date.now() };
                 updateData(prev => ({ ...prev, checklists: [created, ...(prev.checklists || [])] }));
                 setChecklistId(created.id);
                 setNewTitle(''); setNewItemsText(''); setNewScoreMode('deduct'); setNewMaxScore('100'); setCreating(false);
@@ -2404,6 +2404,26 @@
                 }));
             };
 
+            const renameChecklist = (title) => {
+                if (!checklist || !title.trim()) return;
+                updateData(prev => ({
+                    ...prev,
+                    checklists: (prev.checklists || []).map(c => c.id !== checklist.id ? c : { ...c, title: title.trim() }),
+                }));
+            };
+
+            // 체크리스트로 점수를 매기는 동시에, 그 학생에 대한 짧은 평(교과세특
+            // 작성용 메모)도 같이 남길 수 있게 한다. 점수(marks)와는 별개 필드라
+            // 결석/완료 잠금과 상관없이 언제든 적거나 고칠 수 있다. 특정
+            // 체크리스트를 지정해서 쓰므로(지금 보고 있는 체크리스트가 아니어도)
+            // '평 모아보기'에서도 그대로 재사용한다.
+            const setNoteFor = (targetChecklistId, studentId, text) => {
+                updateData(prev => ({
+                    ...prev,
+                    checklists: (prev.checklists || []).map(c => c.id !== targetChecklistId ? c : { ...c, notes: { ...(c.notes || {}), [studentId]: text } }),
+                }));
+            };
+
             const renameItem = (itemId, label) => {
                 if (!checklist || !label.trim()) return;
                 updateData(prev => ({
@@ -2434,6 +2454,32 @@
             // (예: 근찬이처럼 하나도 체크 안 하면 만점), 가점 방식은
             // 기본점수에서 시작해 체크된 항목의 배점만큼 쌓인다.
             const scoreFor = (studentId) => checklistScoreFor(checklist, studentId);
+
+            // 체크리스트마다 흩어져 적은 학생 평을 한곳에 모아서(교과세특
+            // 작성 등에 바로 쓸 수 있게) 보여주는 화면.
+            const [notesView, setNotesView] = useState(false);
+            const [copiedStudentId, setCopiedStudentId] = useState(null);
+            const notesByStudent = useMemo(() => {
+                const byStudent = {};
+                students.forEach(s => { byStudent[s.id] = []; });
+                checklists.forEach(c => {
+                    const notes = c.notes || {};
+                    students.forEach(s => {
+                        const text = (notes[s.id] || '').trim();
+                        if (text) byStudent[s.id].push({ checklistId: c.id, title: c.title, date: c.date, note: text });
+                    });
+                });
+                Object.values(byStudent).forEach(list => list.sort((a, b) => (a.date || '').localeCompare(b.date || '')));
+                return byStudent;
+            }, [checklists, students]);
+            const copyNotesForStudent = async (studentId) => {
+                const text = (notesByStudent[studentId] || []).map(e => `[${e.title}] ${e.note}`).join('\n');
+                try {
+                    await navigator.clipboard.writeText(text);
+                    setCopiedStudentId(studentId);
+                    setTimeout(() => setCopiedStudentId(null), 1500);
+                } catch (e) { /* 클립보드 권한이 없으면 조용히 무시 */ }
+            };
 
             const deleteChecklist = () => {
                 if (!checklist || !window.confirm(`'${checklist.title}' 체크리스트를 삭제할까요?`)) return;
@@ -2586,10 +2632,50 @@
                                 {applyAllBusy ? '적용 중...' : '🔁 다른 학급에도 적용'}
                             </button>
                         )}
+                        {checklists.length > 0 && (
+                            <button onClick={() => setNotesView(v => !v)}
+                                className={`text-xs px-3 py-2 rounded-lg font-bold border ${notesView ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                                ✍️ 학생별 평 모아보기
+                            </button>
+                        )}
                     </div>
                     {applyAllMsg && <p className="text-xs text-emerald-600 mb-2">{applyAllMsg}</p>}
                     {createAllMsg && <p className="text-xs text-emerald-600 mb-2">{createAllMsg}</p>}
 
+                    {notesView ? (
+                        <div className="space-y-3">
+                            <p className="text-xs text-slate-500">체크리스트마다 적어둔 학생 평을 한곳에 모아서 봐요. 교과세특 쓸 때 '전체 복사'로 바로 가져다 쓸 수 있어요. 메모를 눌러서 바로 고칠 수도 있어요.</p>
+                            {students.map(s => {
+                                const entries = notesByStudent[s.id] || [];
+                                return (
+                                    <div key={s.id} className="border border-slate-200 rounded-xl p-3">
+                                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                                            <span className="text-sm font-bold text-slate-800">{s.number ? `${s.number} ` : ''}{s.name}</span>
+                                            {entries.length > 0 && (
+                                                <button onClick={() => copyNotesForStudent(s.id)} className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-indigo-600 hover:bg-indigo-50 shrink-0">
+                                                    {copiedStudentId === s.id ? '복사됨!' : '📋 전체 복사'}
+                                                </button>
+                                            )}
+                                        </div>
+                                        {entries.length === 0 ? (
+                                            <p className="text-xs text-slate-300">아직 메모가 없어요.</p>
+                                        ) : (
+                                            <div className="space-y-1.5">
+                                                {entries.map(e => (
+                                                    <div key={e.checklistId} className="text-xs">
+                                                        <span className="font-bold text-slate-500 whitespace-nowrap">[{e.title}{e.date ? ` · ${e.date}` : ''}]</span>{' '}
+                                                        <InlineEditText value={e.note} onChange={text => setNoteFor(e.checklistId, s.id, text)} className="text-slate-700" />
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                            {students.length === 0 && <p className="text-sm text-slate-400">학생이 없습니다.</p>}
+                        </div>
+                    ) : (
+                    <>
                     {creating && (
                         <div className="border border-slate-200 rounded-xl p-3 mb-4 bg-slate-50 space-y-2">
                             <input value={newTitle} onChange={e => setNewTitle(e.target.value)} placeholder="체크리스트 이름 (예: 우쿨렐레 수행평가)" className="w-full border rounded-lg px-3 py-2 text-sm" />
@@ -2623,6 +2709,11 @@
 
                     {checklist && (
                         <div>
+                            <div className="flex items-center gap-2 mb-2">
+                                <InlineEditText value={checklist.title} onChange={title => renameChecklist(title)}
+                                    title="눌러서 체크리스트 이름을 바로 고쳐요" className="text-base font-bold text-slate-800" />
+                                <span className="text-xs text-slate-400">{checklist.date}</span>
+                            </div>
                             {checklist.completed ? (
                                 <p className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg px-3 py-2 mb-3">✅ 평가가 완료되어 잠겼어요. 수정하려면 '다시 열기'를 눌러주세요.</p>
                             ) : (
@@ -2697,6 +2788,7 @@
                                                     );
                                                 })}
                                                 <th className="px-2 py-2 text-center sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-slate-500">점수</th>
+                                                <th className="px-2 py-2 text-left sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-slate-500">평 (교과세특용 메모)</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -2704,7 +2796,7 @@
                                                 <React.Fragment key={cluster.groupName || 'all'}>
                                                     {cluster.groupName && (
                                                         <tr>
-                                                            <td colSpan={checklist.items.length + 2}
+                                                            <td colSpan={checklist.items.length + 3}
                                                                 className={`px-3 py-1 text-xs font-bold sticky left-0 ${cluster.groupIdx >= 0 ? `${paletteFor(cluster.groupIdx).bg} ${paletteFor(cluster.groupIdx).text}` : 'bg-slate-100 text-slate-500'}`}>
                                                                 {cluster.groupName}
                                                             </td>
@@ -2751,13 +2843,18 @@
                                                                     <span className="text-sm font-bold text-slate-700">{scoreFor(s.id)}점</span>
                                                                 )}
                                                             </td>
+                                                            <td className="p-1">
+                                                                <textarea value={(checklist.notes || {})[s.id] || ''} onChange={e => setNoteFor(checklist.id, s.id, e.target.value)}
+                                                                    placeholder="이 학생에 대한 평..." rows={1}
+                                                                    className="w-44 text-xs border rounded-lg px-2 py-1 outline-none focus:border-indigo-500 resize-y" />
+                                                            </td>
                                                         </tr>
                                                         );
                                                     })}
                                                 </React.Fragment>
                                             ))}
                                             {students.length === 0 && (
-                                                <tr><td colSpan={checklist.items.length + 2} className="px-3 py-4 text-center text-slate-400 text-sm">학생이 없습니다.</td></tr>
+                                                <tr><td colSpan={checklist.items.length + 3} className="px-3 py-4 text-center text-slate-400 text-sm">학생이 없습니다.</td></tr>
                                             )}
                                         </tbody>
                                     </table>
@@ -2768,6 +2865,8 @@
 
                     {!checklist && checklists.length === 0 && !creating && (
                         <p className="text-sm text-slate-400">먼저 '+ 새 체크리스트'로 평가표를 만들어주세요.</p>
+                    )}
+                    </>
                     )}
                 </div>
             );
@@ -4975,7 +5074,7 @@ service cloud.firestore {
                 const makeChecklist = () => ({
                     id: uid(), title, date: todayStr(),
                     items: items.map(i => ({ id: uid(), label: i.label, points: i.points ?? 1 })),
-                    marks: {}, absent: {}, completed: false, scoreMode, maxScore, createdAt: Date.now(),
+                    marks: {}, absent: {}, notes: {}, completed: false, scoreMode, maxScore, createdAt: Date.now(),
                 });
                 for (const code of classCodes) {
                     if (code === classCode) {
