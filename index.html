@@ -2497,14 +2497,22 @@
                 } catch (e) { /* 클립보드 권한이 없으면 조용히 무시 */ }
             };
 
-            // 체크리스트마다 점수가 0점인 학생(결석도 포함 — 둘 다 사실상
-            // '이번엔 점수가 없음'이라 한 번에 모아 본다) 명단을 모아서 보여준다.
+            // 체크리스트마다 항목을 하나도 체크 안 한(그래서 점수가 그
+            // 체크리스트의 기본점수/만점 그대로인) 학생을 모아 본다 — '0점'
+            // 기준은 감점 방식에서만 '아무것도 안 함'을 뜻하고, 가점
+            // 방식에서는 기본점수가 0이 아닌 한 전혀 걸리지 않아서(예:
+            // 기본점수 20점짜리 가점 체크리스트는 아무것도 안 해도 20점),
+            // 두 방식 모두에서 똑같이 '아무 항목도 체크 안 됨'을 기준으로
+            // 삼는다. 결석도 같은 의미라 함께 모은다.
             const [zeroView, setZeroView] = useState(false);
             const zeroStudentsByChecklist = useMemo(() => {
                 return checklists.map(c => {
+                    const marks = c.marks || {};
                     const zeros = students.filter(s => {
                         if (c.absent && c.absent[s.id]) return true;
-                        return checklistScoreFor(c, s.id) === 0;
+                        const studentMarks = marks[s.id] || {};
+                        const earned = c.items.reduce((sum, item) => sum + (studentMarks[item.id] ? (item.points || 0) : 0), 0);
+                        return earned === 0;
                     });
                     return { checklistId: c.id, title: c.title, date: c.date, zeros };
                 });
@@ -2670,7 +2678,7 @@
                         {checklists.length > 0 && (
                             <button onClick={() => { setNotesView(false); setZeroView(v => !v); }}
                                 className={`text-xs px-3 py-2 rounded-lg font-bold border ${zeroView ? 'bg-rose-600 border-rose-600 text-white' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
-                                📉 0점 학생 모아보기
+                                📉 기본점수 학생 모아보기
                             </button>
                         )}
                     </div>
@@ -2679,14 +2687,14 @@
 
                     {zeroView ? (
                         <div className="space-y-3">
-                            <p className="text-xs text-slate-500">체크리스트마다 0점인 학생을 모아서 봐요 (결석도 함께 — 둘 다 이번엔 점수가 없다는 뜻이라 따로 안 나눠요).</p>
+                            <p className="text-xs text-slate-500">체크리스트마다 항목을 하나도 체크 안 해서 점수가 기본점수(또는 만점) 그대로인 학생을 모아서 봐요 (결석도 함께 — 둘 다 아무 항목도 체크되지 않았다는 뜻이라 따로 안 나눠요).</p>
                             {zeroStudentsByChecklist.map(c => (
                                 <div key={c.checklistId} className="border border-slate-200 rounded-xl p-3">
                                     <div className="text-sm font-bold text-slate-800 mb-1">{c.title} <span className="text-xs text-slate-400 font-normal">({c.date})</span></div>
                                     {c.zeros.length === 0 ? (
-                                        <p className="text-xs text-slate-300">0점 학생이 없어요.</p>
+                                        <p className="text-xs text-slate-300">기본점수 그대로인 학생이 없어요.</p>
                                     ) : (
-                                        <p className="text-xs text-rose-600"><span className="font-bold">0점학생:</span> {c.zeros.map(s => `${s.number ? s.number + ' ' : ''}${s.name}`).join(', ')}</p>
+                                        <p className="text-xs text-rose-600"><span className="font-bold">기본점수학생:</span> {c.zeros.map(s => `${s.number ? s.number + ' ' : ''}${s.name}`).join(', ')}</p>
                                     )}
                                 </div>
                             ))}
