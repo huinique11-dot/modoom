@@ -2497,6 +2497,19 @@
                 } catch (e) { /* 클립보드 권한이 없으면 조용히 무시 */ }
             };
 
+            // 체크리스트마다 점수가 0점인 학생(결석도 포함 — 둘 다 사실상
+            // '이번엔 점수가 없음'이라 한 번에 모아 본다) 명단을 모아서 보여준다.
+            const [zeroView, setZeroView] = useState(false);
+            const zeroStudentsByChecklist = useMemo(() => {
+                return checklists.map(c => {
+                    const zeros = students.filter(s => {
+                        if (c.absent && c.absent[s.id]) return true;
+                        return checklistScoreFor(c, s.id) === 0;
+                    });
+                    return { checklistId: c.id, title: c.title, date: c.date, zeros };
+                });
+            }, [checklists, students]);
+
             const deleteChecklist = () => {
                 if (!checklist || !window.confirm(`'${checklist.title}' 체크리스트를 삭제할까요?`)) return;
                 updateData(prev => ({ ...prev, checklists: (prev.checklists || []).filter(c => c.id !== checklist.id) }));
@@ -2634,7 +2647,7 @@
                             {checklists.length === 0 && <option value="">체크리스트 없음</option>}
                             {checklists.map(c => <option key={c.id} value={c.id}>{c.completed ? '✅ ' : ''}{c.title} ({c.date})</option>)}
                         </select>
-                        <button onClick={() => setCreating(v => !v)} className="text-xs bg-indigo-600 text-white px-3 py-2 rounded-lg font-bold hover:bg-indigo-700">+ 새 체크리스트</button>
+                        <button onClick={() => { setNotesView(false); setZeroView(false); setCreating(v => !v); }} className="text-xs bg-indigo-600 text-white px-3 py-2 rounded-lg font-bold hover:bg-indigo-700">+ 새 체크리스트</button>
                         {checklist && (
                             <button onClick={toggleChecklistCompleted}
                                 className={`text-xs px-3 py-2 rounded-lg font-bold border ${checklist.completed ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
@@ -2649,16 +2662,37 @@
                             </button>
                         )}
                         {checklists.length > 0 && (
-                            <button onClick={() => setNotesView(v => !v)}
+                            <button onClick={() => { setZeroView(false); setNotesView(v => !v); }}
                                 className={`text-xs px-3 py-2 rounded-lg font-bold border ${notesView ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
                                 ✍️ 학생별 평 모아보기
+                            </button>
+                        )}
+                        {checklists.length > 0 && (
+                            <button onClick={() => { setNotesView(false); setZeroView(v => !v); }}
+                                className={`text-xs px-3 py-2 rounded-lg font-bold border ${zeroView ? 'bg-rose-600 border-rose-600 text-white' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                                📉 0점 학생 모아보기
                             </button>
                         )}
                     </div>
                     {applyAllMsg && <p className="text-xs text-emerald-600 mb-2">{applyAllMsg}</p>}
                     {createAllMsg && <p className="text-xs text-emerald-600 mb-2">{createAllMsg}</p>}
 
-                    {notesView ? (
+                    {zeroView ? (
+                        <div className="space-y-3">
+                            <p className="text-xs text-slate-500">체크리스트마다 0점인 학생을 모아서 봐요 (결석도 함께 — 둘 다 이번엔 점수가 없다는 뜻이라 따로 안 나눠요).</p>
+                            {zeroStudentsByChecklist.map(c => (
+                                <div key={c.checklistId} className="border border-slate-200 rounded-xl p-3">
+                                    <div className="text-sm font-bold text-slate-800 mb-1">{c.title} <span className="text-xs text-slate-400 font-normal">({c.date})</span></div>
+                                    {c.zeros.length === 0 ? (
+                                        <p className="text-xs text-slate-300">0점 학생이 없어요.</p>
+                                    ) : (
+                                        <p className="text-xs text-rose-600"><span className="font-bold">0점학생:</span> {c.zeros.map(s => `${s.number ? s.number + ' ' : ''}${s.name}`).join(', ')}</p>
+                                    )}
+                                </div>
+                            ))}
+                            {checklists.length === 0 && <p className="text-sm text-slate-400">체크리스트가 없습니다.</p>}
+                        </div>
+                    ) : notesView ? (
                         <div className="space-y-3">
                             <p className="text-xs text-slate-500">체크리스트마다 적어둔 학생 평을 한곳에 모아서 봐요. 교과세특 쓸 때 '전체 복사'로 바로 가져다 쓸 수 있어요. 메모를 눌러서 바로 고칠 수도 있어요.</p>
                             {students.map(s => {
