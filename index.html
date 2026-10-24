@@ -596,6 +596,22 @@
             );
         }
 
+        // 항상 떠있는(InlineEditText처럼 눌러야 나오는 게 아닌) 텍스트
+        // 입력칸인데, 매 글자마다 바로 onChange로 전체 데이터를 갱신해버리면
+        // (updateData가 그때마다 다시 그리기 때문에) 한글 조합 중이던 글자가
+        // 끊겨서 완성이 안 되는 문제가 생긴다. InlineEditText와 같은 방식으로
+        // 로컬 상태에만 타이핑을 담아두다가 포커스를 벗어날 때만 실제로
+        // 저장한다.
+        function BufferedTextarea({ value, onCommit, placeholder = '', className = '', rows = 1 }) {
+            const [val, setVal] = useState(value || '');
+            useEffect(() => { setVal(value || ''); }, [value]);
+            return (
+                <textarea value={val} onChange={e => setVal(e.target.value)}
+                    onBlur={() => { if (val !== (value || '')) onCommit(val); }}
+                    placeholder={placeholder} rows={rows} className={className} />
+            );
+        }
+
         // 좁은 표 안에서 날짜를 "연-월-일" 전체로 보여주면 자리를 너무 많이
         // 차지해서, 보이는 글자는 "월-일"만 남기고 실제 날짜 선택(달력)은
         // 투명하게 겹쳐둔 진짜 <input type="date">가 그대로 처리하게 한다.
@@ -2844,7 +2860,7 @@
                                                                 )}
                                                             </td>
                                                             <td className="p-1">
-                                                                <textarea value={(checklist.notes || {})[s.id] || ''} onChange={e => setNoteFor(checklist.id, s.id, e.target.value)}
+                                                                <BufferedTextarea value={(checklist.notes || {})[s.id] || ''} onCommit={text => setNoteFor(checklist.id, s.id, text)}
                                                                     placeholder="이 학생에 대한 평..." rows={1}
                                                                     className="w-44 text-xs border rounded-lg px-2 py-1 outline-none focus:border-indigo-500 resize-y" />
                                                             </td>
