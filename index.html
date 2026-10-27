@@ -4178,9 +4178,10 @@
             );
         }
 
-        function SettingsTab({ classCode, classCodes, firebaseConfigText, setFirebaseConfigText, applyFirebaseConfig, connected, syncError, googleClientId, setGoogleClientId, google, data, updateData, timetable, setTimetableSlot, noSchoolDates, addNoSchoolRange, removeNoSchoolRange }) {
+        function SettingsTab({ classCode, classCodes, firebaseConfigText, setFirebaseConfigText, applyFirebaseConfig, connected, syncError, googleClientId, setGoogleClientId, google, data, updateData, timetable, setTimetableSlot, noSchoolDates, addNoSchoolRange, removeNoSchoolRange, fetchAllClassData, restoreAllClassData }) {
             const [exportBusy, setExportBusy] = useState(false);
             const [exportMsg, setExportMsg] = useState('');
+            const [backupAllBusy, setBackupAllBusy] = useState(false);
             const fileInputRef = useRef(null);
 
             const doExport = async () => {
@@ -4195,16 +4196,37 @@
 
             const removeCategory = (name) => updateData(prev => ({ ...prev, categories: prev.categories.filter(c => c !== name) }));
 
-            const backupJson = () => downloadFile(`모둠생기부_백업_${todayStr()}.json`, JSON.stringify(data, null, 2));
+            const backupJson = () => downloadFile(`모둠생기부_백업_${classCode}_${todayStr()}.json`, JSON.stringify(data, null, 2));
+            // "백업 파일 저장"이 지금 보고 있는 반만 저장돼서 전체 백업처럼
+            // 안 보인다는 혼동이 있어서, 모든 반을 한 파일에 묶어 저장하는
+            // 버튼을 따로 뒀다. 반 코드별로 묶은 { classes: { [반코드]: 데이터 } }
+            // 형태라 restoreJson이 평소 단일 학급 백업과 구분해서 복원한다.
+            const backupAllJson = async () => {
+                setBackupAllBusy(true);
+                try {
+                    const classes = await fetchAllClassData();
+                    const payload = { app: '모둠 활동 도우미', exportedAt: todayStr(), classCodes, classes };
+                    downloadFile(`모둠활동도우미_전체백업_${todayStr()}.json`, JSON.stringify(payload, null, 2));
+                } finally {
+                    setBackupAllBusy(false);
+                }
+            };
             const restoreJson = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
                 const reader = new FileReader();
-                reader.onload = () => {
+                reader.onload = async () => {
                     try {
                         const parsed = JSON.parse(reader.result);
-                        if (!window.confirm('현재 데이터를 백업 파일 내용으로 덮어씁니다. 계속할까요?')) return;
-                        updateData(() => ({ ...DEFAULT_DATA, ...parsed }));
+                        if (parsed && parsed.classes && typeof parsed.classes === 'object') {
+                            const codes = Object.keys(parsed.classes);
+                            if (!window.confirm(`전체 백업 파일이에요 (${codes.length}개 학급: ${codes.join(', ')}). 각 학급의 데이터를 이 백업 내용으로 덮어씁니다. 계속할까요?`)) return;
+                            await restoreAllClassData(parsed.classes);
+                            alert('전체 백업을 복원했습니다.');
+                        } else {
+                            if (!window.confirm('현재 데이터를 백업 파일 내용으로 덮어씁니다. 계속할까요?')) return;
+                            updateData(() => ({ ...DEFAULT_DATA, ...parsed }));
+                        }
                     } catch (err) { alert('올바른 백업 파일이 아닙니다.'); }
                 };
                 reader.readAsText(file);
@@ -4342,9 +4364,12 @@ service cloud.firestore {
 
                     <section>
                         <h3 className="text-lg font-bold text-slate-900 mb-2">💾 백업 파일</h3>
-                        <p className="text-xs text-slate-500 mb-3">Firebase나 구글 계정 없이도 전체 데이터를 파일로 저장하고 불러올 수 있습니다.</p>
-                        <div className="flex items-center gap-2">
-                            <button onClick={backupJson} className="bg-white border border-slate-300 text-xs font-bold px-3 py-2 rounded-lg hover:bg-slate-50">백업 파일 저장</button>
+                        <p className="text-xs text-slate-500 mb-3">Firebase나 구글 계정 없이도 데이터를 파일로 저장하고 불러올 수 있습니다. "전체 백업"은 지금 쓰고 있는 모든 학급({classCodes.join(', ')})을 한 파일에 담고, "이 학급만 백업"은 지금 보고 있는 '{classCode}' 반만 담습니다. 불러오기는 어느 쪽 파일이든 알아서 구분해서 복원해요.</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                            {classCodes.length > 1 && (
+                                <button onClick={backupAllJson} disabled={backupAllBusy} className="bg-indigo-600 text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50">{backupAllBusy ? '모으는 중...' : `🗂️ 전체 백업 저장 (${classCodes.length}개 학급)`}</button>
+                            )}
+                            <button onClick={backupJson} className="bg-white border border-slate-300 text-xs font-bold px-3 py-2 rounded-lg hover:bg-slate-50">이 학급만 백업 저장</button>
                             <button onClick={() => fileInputRef.current.click()} className="bg-white border border-slate-300 text-xs font-bold px-3 py-2 rounded-lg hover:bg-slate-50">백업 파일 불러오기</button>
                             <input ref={fileInputRef} type="file" accept="application/json" onChange={restoreJson} className="hidden" />
                         </div>
@@ -4958,6 +4983,59 @@ service cloud.firestore {
                 return result;
             };
 
+            // "백업 파일 저장"이 원래 지금 보고 있는 반만 저장해서(의도와
+            // 달리) 전체 백업처럼 안 보인다는 혼동이 있었다 — 모든 반의
+            // 전체 데이터를 반 코드별로 묶어서 하나의 백업 파일로 만들 때
+            // 쓴다. fetchAllProgress와 같은 이유로 항상 저장소에서 새로
+            // 읽어온다(data state가 아직 최신이 아닐 수 있어서).
+            const fetchAllClassData = async () => {
+                const result = {};
+                for (const code of classCodes) {
+                    try {
+                        if (db) {
+                            const snap = await db.collection('classes').doc(code).get();
+                            result[code] = snap.exists ? { ...DEFAULT_DATA, ...snap.data() } : DEFAULT_DATA;
+                        } else {
+                            const raw = localStorage.getItem(`sga_data_${code}`);
+                            result[code] = raw ? { ...DEFAULT_DATA, ...JSON.parse(raw) } : DEFAULT_DATA;
+                        }
+                    } catch (e) {
+                        result[code] = DEFAULT_DATA;
+                    }
+                }
+                return result;
+            };
+
+            // 전체 백업 파일을 그대로 복원한다. 지금 보고 있는 반은
+            // updateData를 통해야 화면에 바로 반영되고(다른 helper들과
+            // 같은 패턴), 다른 반들은 저장소에 직접 써서 다음에 그 반으로
+            // 전환할 때 보이게 한다. 백업에만 있고 지금 학급 목록엔 없는
+            // 반 코드가 있으면 목록에도 추가한다.
+            const restoreAllClassData = async (classesObj) => {
+                const codes = Object.keys(classesObj);
+                for (const code of codes) {
+                    const next = { ...DEFAULT_DATA, ...classesObj[code] };
+                    if (code === classCode) {
+                        updateData(() => next);
+                        continue;
+                    }
+                    try {
+                        if (db) {
+                            await transactionalWrite(db.collection('classes').doc(code), () => next);
+                        } else {
+                            localStorage.setItem(`sga_data_${code}`, JSON.stringify(next));
+                        }
+                    } catch (e) {
+                        console.error('restore failed for', code, e);
+                    }
+                }
+                setClassCodes(prev => {
+                    const merged = [...new Set([...prev, ...codes])];
+                    localStorage.setItem('sga_classCodes', JSON.stringify(merged));
+                    return merged;
+                });
+            };
+
             // Lets the 항목 체크 화면borrow another class's checklist items
             // (e.g. reuse the same 수행평가 rubric across parallel classes)
             // without touching that other class's own checked marks.
@@ -5252,6 +5330,8 @@ service cloud.firestore {
                                     noSchoolDates={noSchoolDates}
                                     addNoSchoolRange={addNoSchoolRange}
                                     removeNoSchoolRange={removeNoSchoolRange}
+                                    fetchAllClassData={fetchAllClassData}
+                                    restoreAllClassData={restoreAllClassData}
                                 />
                             )}
                         </div>
