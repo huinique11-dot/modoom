@@ -2471,6 +2471,13 @@
             // 기본점수에서 시작해 체크된 항목의 배점만큼 쌓인다.
             const scoreFor = (studentId) => checklistScoreFor(checklist, studentId);
 
+            // 전교 100점을 몇 명에게 줄지 세어가며 채점할 때, 지금 체크리스트
+            // 점수만 보면 알 수 없으니 모든 체크리스트를 합친 총점을 채점하는
+            // 그 자리에서 바로 보여준다(명단관리의 '총합'과 같은 계산식).
+            // 체크할 때마다 바로 반영되도록 매번 다시 계산한다.
+            const totalScoreFor = (studentId) => checklists.reduce((sum, c) => sum + (checklistScoreFor(c, studentId) || 0), 0);
+            const studentsAt100 = useMemo(() => students.filter(s => totalScoreFor(s.id) === 100).length, [checklists, students]);
+
             // 체크리스트마다 흩어져 적은 학생 평을 한곳에 모아서(교과세특
             // 작성 등에 바로 쓸 수 있게) 보여주는 화면.
             const [notesView, setNotesView] = useState(false);
@@ -2684,6 +2691,11 @@
                     </div>
                     {applyAllMsg && <p className="text-xs text-emerald-600 mb-2">{applyAllMsg}</p>}
                     {createAllMsg && <p className="text-xs text-emerald-600 mb-2">{createAllMsg}</p>}
+                    {checklists.length > 0 && (
+                        <p className={`text-xs font-bold mb-2 ${studentsAt100 >= 10 && studentsAt100 <= 15 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                            💯 지금 총점 100점인 학생: {studentsAt100}명 (모든 체크리스트 합계 기준)
+                        </p>
+                    )}
 
                     {zeroView ? (
                         <div className="space-y-3">
@@ -2846,6 +2858,7 @@
                                                     );
                                                 })}
                                                 <th className="px-2 py-2 text-center sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-slate-500">점수</th>
+                                                <th className="px-2 py-2 text-center sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-slate-500" title="모든 체크리스트를 합친 점수예요">총점</th>
                                                 <th className="px-2 py-2 text-left sticky top-0 z-10 border-b border-slate-200 bg-slate-50 text-slate-500">평 (교과세특용 메모)</th>
                                             </tr>
                                         </thead>
@@ -2854,7 +2867,7 @@
                                                 <React.Fragment key={cluster.groupName || 'all'}>
                                                     {cluster.groupName && (
                                                         <tr>
-                                                            <td colSpan={checklist.items.length + 3}
+                                                            <td colSpan={checklist.items.length + 4}
                                                                 className={`px-3 py-1 text-xs font-bold sticky left-0 ${cluster.groupIdx >= 0 ? `${paletteFor(cluster.groupIdx).bg} ${paletteFor(cluster.groupIdx).text}` : 'bg-slate-100 text-slate-500'}`}>
                                                                 {cluster.groupName}
                                                             </td>
@@ -2901,6 +2914,9 @@
                                                                     <span className="text-sm font-bold text-slate-700">{scoreFor(s.id)}점</span>
                                                                 )}
                                                             </td>
+                                                            <td className="p-1 text-center" title="모든 체크리스트를 합친 총점">
+                                                                <span className={`text-sm font-bold ${totalScoreFor(s.id) === 100 ? 'text-amber-600' : 'text-slate-400'}`}>{totalScoreFor(s.id)}점</span>
+                                                            </td>
                                                             <td className="p-1">
                                                                 <BufferedTextarea value={(checklist.notes || {})[s.id] || ''} onCommit={text => setNoteFor(checklist.id, s.id, text)}
                                                                     placeholder="이 학생에 대한 평..." rows={1}
@@ -2912,7 +2928,7 @@
                                                 </React.Fragment>
                                             ))}
                                             {students.length === 0 && (
-                                                <tr><td colSpan={checklist.items.length + 3} className="px-3 py-4 text-center text-slate-400 text-sm">학생이 없습니다.</td></tr>
+                                                <tr><td colSpan={checklist.items.length + 4} className="px-3 py-4 text-center text-slate-400 text-sm">학생이 없습니다.</td></tr>
                                             )}
                                         </tbody>
                                     </table>
