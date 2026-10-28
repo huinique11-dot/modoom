@@ -2548,6 +2548,24 @@
                 }));
             };
 
+            // 뒤늦게 추가한 항목을 앞으로 옮기는 등, 항목(열) 순서를 바꾼다.
+            // 경계(맨 앞/맨 뒤)에서는 조용히 아무 일도 안 한다.
+            const moveItem = (itemId, delta) => {
+                if (!checklist) return;
+                updateData(prev => ({
+                    ...prev,
+                    checklists: (prev.checklists || []).map(c => {
+                        if (c.id !== checklist.id) return c;
+                        const items = [...c.items];
+                        const idx = items.findIndex(i => i.id === itemId);
+                        const swapIdx = idx + delta;
+                        if (idx < 0 || swapIdx < 0 || swapIdx >= items.length) return c;
+                        [items[idx], items[swapIdx]] = [items[swapIdx], items[idx]];
+                        return { ...c, items };
+                    }),
+                }));
+            };
+
             const toggleMark = (studentId, itemId) => {
                 if (!checklist) return;
                 updateData(prev => ({
@@ -2849,9 +2867,13 @@
                                                                 </div>
                                                             )}
                                                             {!checklist.completed && (
-                                                                <div className="flex items-center justify-center gap-2">
+                                                                <div className="flex items-center justify-center gap-1">
+                                                                    <button onClick={() => moveItem(item.id, -1)} disabled={idx === 0} title="이 항목을 왼쪽으로 옮겨요"
+                                                                        className={`text-[10px] font-bold ${idx === 0 ? 'text-slate-200 cursor-not-allowed' : 'text-slate-400 hover:text-indigo-600'}`}>◀</button>
                                                                     <button onClick={() => invertColumn(item.id)} title="이 항목의 체크를 전체 학생 기준으로 반대로 뒤집어요" className="text-[10px] text-slate-400 hover:text-indigo-600">반전</button>
                                                                     <button onClick={() => removeItem(item.id)} className="text-[10px] text-slate-400 hover:text-rose-500">삭제</button>
+                                                                    <button onClick={() => moveItem(item.id, 1)} disabled={idx === checklist.items.length - 1} title="이 항목을 오른쪽으로 옮겨요"
+                                                                        className={`text-[10px] font-bold ${idx === checklist.items.length - 1 ? 'text-slate-200 cursor-not-allowed' : 'text-slate-400 hover:text-indigo-600'}`}>▶</button>
                                                                 </div>
                                                             )}
                                                         </th>
